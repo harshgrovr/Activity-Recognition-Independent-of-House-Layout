@@ -1,14 +1,12 @@
-import numpy as np
-import os
+
 import torch
 from torch.utils.data import DataLoader
 import torch.nn as nn
 from torch.autograd import Variable
-from torch.utils.data.sampler import SubsetRandomSampler
-from dataLoader import SensorImageDataset
+from dataLoader import datasetHDF5
 from network import CNNModel
 import sys
-
+import os
 
 def train(fileName):
 
@@ -17,19 +15,19 @@ def train(fileName):
     learning_rate = 0.01
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     iter = 0
-    test_split = .2
-    dataset_size = 1000
-    indices = list(range(dataset_size))
-    split = int(np.floor(test_split * dataset_size))
-    train_indices, test_indices = indices[split:], indices[:split]
-    dataset = SensorImageDataset(csv_file_path= fileName + '.csv', json_file_path = fileName + '.json', root_dir = os.getcwd(), transform = None)
+    # test_split = .2
+    # dataset_size = 1000
+    # indices = list(range(dataset_size))
+    # split = int(np.floor(test_split * dataset_size))
+    # train_indices, test_indices = indices[split:], indices[:split]
     # Creating PT data samplers and loaders:
-    train_sampler = SubsetRandomSampler(train_indices)
-    test_sampler = SubsetRandomSampler(test_indices)
-
-    trainLoader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, sampler=train_sampler)
-    testLoader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, sampler=test_sampler)
-
+    # train_sampler = SubsetRandomSampler(train_indices)
+    # test_sampler = SubsetRandomSampler(test_indices)
+    # #
+    # trainLoader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, sampler=train_sampler)
+    # testLoader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, sampler=test_sampler)
+    train_file = os.path.join(os.getcwd(), 'h5py', '24-Jul-2009.h5')
+    trainLoader = DataLoader(datasetHDF5(train_file), batch_size=1, shuffle=False)
 
     num_epochs = 1000
     for epoch in range(num_epochs):
@@ -60,7 +58,7 @@ def train(fileName):
                 correct = 0
                 total = 0
                 # Iterate through test dataset
-                for images, labels in testLoader:
+                for images, labels in trainLoader:
                     images = images.permute(0, 3, 1, 2)  # from NHWC to NCHW
                     # Load images to a Torch Variable
                     images = Variable(images)

@@ -1,75 +1,29 @@
-import json
-import cv2
-import pandas as pd
-import numpy as np
-import os
 import torch
 from torch.utils.data import Dataset
+import h5py
+import numpy as np
 
-from dataGeneration import generateObjectChannels, generateSensorChannelForTheMinute
 
+class datasetHDF5(Dataset):
+    def __init__(self, h5_path):
+        super(datasetHDF5, self).__init__()
+        self.h5File = h5py.File(h5_path, 'r')
 
-class SensorImageDataset(Dataset):
-    def __init__(self, csv_file_path, json_file_path, root_dir, transform = None):
-        df = pd.read_csv(csv_file_path)
-        self.csvFile = df.iloc[:1000, :]
-        with open(json_file_path) as f:
-            d = json.load(f)
-        self.jsonFile = d
-        self.transform = transform
-        self.root_dir = root_dir
-        self.width = 908
-        self.height = 740
-        self.channel = 1
-        self.objectChannel = generateObjectChannels(self.jsonFile, self.width, self.height, self.channel)
-        self.ActivityIdList = [
-            { "name": "idle", "id": 0 },
-            { "name": "leaveHouse", "id": 1 },
-            { "name": "useToilet", "id": 2 },
-            { "name": "takeShower", "id": 3 },
-            { "name": "brushTeeth", "id": 4 },
-            { "name": "goToBed", "id": 5 },
-            { "name": "getDressed", "id": 6 },
-            { "name": "prepareBreakfast", "id": 7 },
-            { "name": "prepareDinner", "id": 8 },
-            { "name": "getSnack", "id": 9 },
-            { "name": "getDrink", "id": 10 },
-            { "name": "loadDishwasher", "id": 11 },
-            { "name": "unloadDishwasher", "id": 12 },
-            { "name": "storeGroceries", "id": 13 },
-            { "name": "washDishes", "id": 14 },
-            { "name": "answerPhone", "id": 15 },
-            { "name": "eatDinner", "id": 16 },
-            { "name": "eatBreakfast", "id": 17 }
-        ]
-
-    def __len__(self):
-        return len(self.csvFile)
+        shape = self.h5File['images'].shape
+        shape = self.h5File['labels'].shape
+        print('keys are: ',list(self.h5File.keys()), 'shape is: ', shape)
 
     def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-        self.image_name = os.path.join(self.root_dir, 'AnnotatedImage', self.csvFile.iloc[idx, 0])
-        self.image = cv2.imread(self.image_name + '.png')
-        self.sensorChannel = generateSensorChannelForTheMinute(self.jsonFile, self.csvFile.iloc[idx, 0], self.csvFile, self.width, self.height, self.channel)
-        self.image = np.concatenate((self.image, self.objectChannel, self.sensorChannel), axis=2)
+        input = self.h5File['images'][idx, :, :, :]
+        label = self.h5File['labels'][idx]
+        print(type(input), type(label))
+        input = torch.as_tensor(np.array(input).astype('float'))
+        label = torch.as_tensor(np.array(label).astype('long'))
+        return input, label
 
-        if self.transform:
-            self.image = self.transform(self.image)
-
-        # get label
-        label = self.csvFile.iloc[idx, 2]
-
-        # Get label ID
-        label = [x for x in self.ActivityIdList if x["name"] == label]
-        label = label[0]['id']
-
-
-        self.image = torch.from_numpy(self.image).float()
-        label = torch.from_numpy(np.array(label)).long()
-
-        return self.image, label
-
+    def __len__(self):
+        self.length = len(self.h5File)
+        return self.length
 
 
 

@@ -10,11 +10,12 @@ import sys
 import datetime
 from datetime import datetime, timedelta
 from dataGeneration import generateObjectChannels, generateSensorChannelForTheMinute
+import torch
 
 class Sensor():
   def __init__(self, csv_file_path, json_file_path, root_dir, transform=None):
     df = pd.read_csv(csv_file_path)
-    self.csvFile = df.iloc[:10, :]
+    self.csvFile = df.iloc[:2, :]
     with open(json_file_path) as f:
       d = json.load(f)
     self.jsonFile = d
@@ -52,31 +53,42 @@ class Sensor():
     return start_datetime
 
   def generateOffline(self):
-    array = []
+
     firstdate = self.getDate(self.csvFile.head(1).iloc[0, 0])
     lastDate = self.getDate(self.csvFile.tail(1).iloc[0,0])
 
     idx = -1
     while firstdate <= lastDate:
+      images = np.zeros((1, 740, 908, 22))
+      labels = np.array([], dtype=np.long)
       idx += 1
-
       while firstdate == self.getDate(self.csvFile.iloc[idx, 0]):
         self.image_name = os.path.join(self.root_dir, 'AnnotatedImage', self.csvFile.iloc[idx, 0])
-        self.h5Name = os.path.join(self.root_dir, 'h5py', self.csvFile.iloc[idx, 0])
         self.image = cv2.imread(self.image_name + '.png')
-        self.sensorChannel = generateSensorChannelForTheMinute(self.jsonFile, self.csvFile.iloc[idx, 0], self.csvFile,                                                               self.width, self.height, self.channel)
-        self.image = np.concatenate((self.image, self.objectChannel, self.sensorChannel), axis=2)
-        array.append(self.image)
-        idx += 1
-        if idx >= 10:
-          break
 
-      archive = h5py.File(firstdate.strftime('%d-%b-%Y') + '.h5', 'w')
-      archive.create_dataset('/array', data=array)
+        self.sensorChannel = generateSensorChannelForTheMinute(self.jsonFile, self.csvFile.iloc[idx, 0], self.csvFile, self.width, self.height, self.channel)
+
+        self.image = np.concatenate((self.image, self.objectChannel, self.sensorChannel), axis=2)
+        self.image = np.expand_dims(self.image, axis= 0)
+        if self.transform:
+            self.image = self.transform(self.image)
+
+        images = np.append(images, self.image, axis = 0)
+        # get label
+        label = self.csvFile.iloc[idx, 2]
+        # Get label ID
+        label = [x for x in self.ActivityIdList if x["name"] == label]
+        label = label[0]['id']
+        labels = np.append(labels, label)
+        idx += 1
+        if idx >= len(self.csvFile.index):
+          break
+      self.h5Name = os.path.join(self.root_dir, 'h5py', firstdate.strftime('%d-%b-%Y') + '.h5')
+      archive = h5py.File(self.h5Name, 'w')
+      archive.create_dataset('/images', data=images[1:,...], compression='gzip',compression_opts=6)
+      archive.create_dataset('/labels',data=labels, compression='gzip', compression_opts=6)
       archive.close()
       firstdate += timedelta(days=1)
-
-
 
 
 if __name__ == "__main__":
