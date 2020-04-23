@@ -6,20 +6,9 @@ import sys
 import cv2
 import pandas as pd
 import numpy as np
-import glob
 import os
-import collections
 from itertools import islice
-import torch
-from torch.utils.data import Dataset, DataLoader
 import glob
-import torch.nn as nn
-import torchvision
-import torchvision.transforms as transforms
-import torchvision.datasets as dsets
-from torch.autograd import Variable
-from torch.utils.data.sampler import SubsetRandomSampler
-from training import train
 
 
 
@@ -438,6 +427,7 @@ def generateObjectChannelsImage(jsonFile, width = 908, height = 740,channel = 1)
             objectChannel[y1:y2, x1:x2, :] = 1
             cv2.imwrite("color_img.jpg", objectChannel * 255)
     cv2.imwrite("color_img.jpg", objectChannel * 255)
+
 def generateSensorChannelForTheMinute(jsonFile, minute='24-Jul-2009 16:46:00', csvFile = '', width = 908, height = 740, channel = 1):
     # Generate Objects Channel. A single channel for each unique object
     df = csvFile[csvFile['start'] == minute]
@@ -454,26 +444,25 @@ if __name__ == "__main__":
     if sys.argv[1] != None:
         file_name = sys.argv[1].split('.')[0]
 
-        # # sort the two Sensor and Activity data of JSON and replace the old JSON file
-        # sortDictionary(sys.argv[1], 'sensorData')
-        # sortDictionary(sys.argv[1], 'activityData')
-        # # Convert JSON to CSV
-        # JSON_to_CSV(sys.argv[1])
+        # sort the two Sensor and Activity data of JSON and replace the old JSON file
+        sortDictionary(sys.argv[1], 'sensorData')
+        sortDictionary(sys.argv[1], 'activityData')
 
-        # # # Generate Dictionary Template for Annotations
+        # Convert JSON to CSV
+        JSON_to_CSV(sys.argv[1])
 
+        # # Generate Dictionary Template for Annotations
+        generateBaseImage(sys.argv[1], file_name + '.png', width1=908, height1= 740)
 
-        # generateBaseImage(sys.argv[1], file_name + '.png', width1=908, height1= 740)
+        # # Generate an Image named Annoation.png , showing all the sensors and objects
+        generateImagewithAllAnnoations(sys.argv[1], file_name + '.png')
 
-        # # # Generate an Image named Annoation.png , showing all the sensors and objects
-        # generateImagewithAllAnnoations(sys.argv[1], file_name + '.png')
-        # #
-        # # # Make a folder and save all the annotated Image per minute bases
-        # annotateImage(sys.argv[1], file_name + '.png', minutesToGenrate = 1000)
-        # #
-        # # # Generate a video on above generated Image
-        # makeVideo(os.path.join(os.getcwd(), 'AnnotatedImage'), fps=10)
-        train(file_name)
+        # # Make a folder and save all the annotated Image per minute bases
+        annotateImage(sys.argv[1], file_name + '.png', minutesToGenrate = 1000)
+
+        # # Generate a video on above generated Image
+        makeVideo(os.path.join(os.getcwd(), 'AnnotatedImage'), fps=10)
+
 
 
 

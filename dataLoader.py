@@ -1,25 +1,12 @@
 import json
-from datetime import datetime
-from datetime import timedelta
-import csv
-import sys
 import cv2
 import pandas as pd
 import numpy as np
-import glob
 import os
-import collections
-from itertools import islice
 import torch
-from torch.utils.data import Dataset, DataLoader
-import glob
-import torch.nn as nn
-import torchvision
-import torchvision.transforms as transforms
-import torchvision.datasets as dsets
-from torch.autograd import Variable
-from torch.utils.data.sampler import SubsetRandomSampler
-from dataGeneration import generateObjectChannelsImage, generateObjectChannels, generateSensorChannelForTheMinute
+from torch.utils.data import Dataset
+
+from dataGeneration import generateObjectChannels, generateSensorChannelForTheMinute
 
 
 class SensorImageDataset(Dataset):
@@ -34,7 +21,6 @@ class SensorImageDataset(Dataset):
         self.width = 908
         self.height = 740
         self.channel = 1
-        generateObjectChannelsImage(self.jsonFile, self.width, self.height, self.channel)
         self.objectChannel = generateObjectChannels(self.jsonFile, self.width, self.height, self.channel)
         self.ActivityIdList = [
             { "name": "idle", "id": 0 },
@@ -63,18 +49,25 @@ class SensorImageDataset(Dataset):
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
-        self.image_name = os.path.join(self.root_dir,'AnnotatedImage' , self.csvFile.iloc[idx, 0])
+        self.image_name = os.path.join(self.root_dir, 'AnnotatedImage', self.csvFile.iloc[idx, 0])
         self.image = cv2.imread(self.image_name + '.png')
-        self.sensorChannel = generateSensorChannelForTheMinute(self.jsonFile,self.csvFile.iloc[idx, 0], self.csvFile,self.width, self.height, self.channel)
+        self.sensorChannel = generateSensorChannelForTheMinute(self.jsonFile, self.csvFile.iloc[idx, 0], self.csvFile, self.width, self.height, self.channel)
         self.image = np.concatenate((self.image, self.objectChannel, self.sensorChannel), axis=2)
 
         if self.transform:
             self.image = self.transform(self.image)
+
+        # get label
         label = self.csvFile.iloc[idx, 2]
+
+        # Get label ID
         label = [x for x in self.ActivityIdList if x["name"] == label]
         label = label[0]['id']
+
+
         self.image = torch.from_numpy(self.image).float()
         label = torch.from_numpy(np.array(label)).long()
+
         return self.image, label
 
 

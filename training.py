@@ -1,29 +1,17 @@
-import json
-from datetime import datetime
-from datetime import timedelta
-import csv
-import sys
-import cv2
-import pandas as pd
 import numpy as np
-import glob
 import os
-import collections
-from itertools import islice
 import torch
-from torch.utils.data import Dataset, DataLoader
-import glob
+from torch.utils.data import DataLoader
 import torch.nn as nn
-import torchvision
-import torchvision.transforms as transforms
-import torchvision.datasets as dsets
 from torch.autograd import Variable
 from torch.utils.data.sampler import SubsetRandomSampler
 from dataLoader import SensorImageDataset
 from network import CNNModel
+import sys
 
 
-def train(self):
+def train(fileName):
+
     model = CNNModel()
     criterion = nn.CrossEntropyLoss()
     learning_rate = 0.01
@@ -34,13 +22,13 @@ def train(self):
     indices = list(range(dataset_size))
     split = int(np.floor(test_split * dataset_size))
     train_indices, test_indices = indices[split:], indices[:split]
-    dataset = SensorImageDataset(csv_file_path= self.fileName + '.csv', json_file_path = self.fileName + '.json', root_dir = os.getcwd(), transform = None)
+    dataset = SensorImageDataset(csv_file_path= fileName + '.csv', json_file_path = fileName + '.json', root_dir = os.getcwd(), transform = None)
     # Creating PT data samplers and loaders:
     train_sampler = SubsetRandomSampler(train_indices)
     test_sampler = SubsetRandomSampler(test_indices)
 
-    trainLoader = DataLoader(dataset, batch_size=4, shuffle=False, num_workers=2, sampler=train_sampler)
-    testLoader = DataLoader(dataset, batch_size=4, shuffle=False, num_workers=2, sampler=test_sampler)
+    trainLoader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, sampler=train_sampler)
+    testLoader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, sampler=test_sampler)
 
 
     num_epochs = 1000
@@ -95,9 +83,10 @@ def train(self):
                 print('Iteration: {}. Loss: {}. Accuracy: {}'.format(iter, loss.data[0], accuracy))
 
 
-
-
-
+if __name__ == "__main__":
+    if sys.argv[1] != None:
+        file_name = sys.argv[1].split('.')[0]
+        train(file_name)
 
 
 
