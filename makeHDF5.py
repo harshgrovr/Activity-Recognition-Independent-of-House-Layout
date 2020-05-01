@@ -1,5 +1,4 @@
 
-import numpy as np
 import h5py
 import json
 import cv2
@@ -10,7 +9,6 @@ import sys
 import datetime
 from datetime import datetime, timedelta
 from dataGeneration import generateObjectChannels, generateSensorChannelForTheMinute
-import torch
 
 class Sensor():
   def __init__(self, csv_file_path, json_file_path, root_dir, transform=None):
@@ -53,23 +51,20 @@ class Sensor():
     return start_datetime
 
   def generateOffline(self):
-
     firstdate = self.getDate(self.csvFile.head(1).iloc[0, 0])
     lastDate = self.getDate(self.csvFile.tail(1).iloc[0,0])
-
-    idx = -1
+    idx = 0
     while firstdate <= lastDate:
       images = np.zeros((1, 740, 908, 22))
       labels = np.array([], dtype=np.long)
-      idx += 1
+
       while firstdate == self.getDate(self.csvFile.iloc[idx, 0]):
         self.image_name = os.path.join(self.root_dir, 'AnnotatedImage', self.csvFile.iloc[idx, 0])
         self.image = cv2.imread(self.image_name + '.png')
-
         self.sensorChannel = generateSensorChannelForTheMinute(self.jsonFile, self.csvFile.iloc[idx, 0], self.csvFile, self.width, self.height, self.channel)
-
         self.image = np.concatenate((self.image, self.objectChannel, self.sensorChannel), axis=2)
         self.image = np.expand_dims(self.image, axis= 0)
+
         if self.transform:
             self.image = self.transform(self.image)
 
@@ -81,13 +76,18 @@ class Sensor():
         label = label[0]['id']
         labels = np.append(labels, label)
         idx += 1
+
         if idx >= len(self.csvFile.index):
           break
+
+      # Create h5py file for each day
       self.h5Name = os.path.join(self.root_dir, 'h5py', firstdate.strftime('%d-%b-%Y') + '.h5')
       archive = h5py.File(self.h5Name, 'w')
-      archive.create_dataset('/images', data=images[1:,...], compression='gzip',compression_opts=6)
-      archive.create_dataset('/labels',data=labels, compression='gzip', compression_opts=6)
+      archive.create_dataset('/images', data=images[1:,...])
+      archive.create_dataset('/labels',data=labels)
       archive.close()
+
+      # Incrementing first date till it reaches to last date
       firstdate += timedelta(days=1)
 
 
