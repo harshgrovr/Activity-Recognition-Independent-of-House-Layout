@@ -11,18 +11,26 @@ from sklearn.model_selection import LeaveOneOut
 import datetime
 import gc
 
-def train(fileName):
+def train():
     learning_rate = 0.01
+    num_epochs = 2
+    total_num_iteration_for_LOOCV = 0
+    total_acc_for_LOOCV = 0
 
+    # Defining Model, Optimizer and Loss
     model = CNNModel()
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
+    # Get names of all h5 files
     h5Files = [f.split('.h5')[:-1] for f in os.listdir(os.path.join(os.getcwd(), 'h5py')) if f.endswith('.h5')]
+
     loo = LeaveOneOut()
     h5Directory = os.path.join(os.getcwd(), 'h5py')
 
+    # Apply Leave one out on all the files in h5files
     for train_index, test_index in loo.split(h5Files):
+        total_num_iteration_for_LOOCV += 1
         # Train
         for file_index in train_index:
             closeH5Files()
@@ -32,7 +40,7 @@ def train(fileName):
 
             dataset = datasetHDF5(curr_file_path = file_path)
             trainLoader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1)
-            num_epochs = 2
+
             training(num_epochs, trainLoader,  optimizer, model, criterion)
 
         # Test
@@ -43,7 +51,9 @@ def train(fileName):
 
             dataset = datasetHDF5(curr_file_path=file_path)
             testLoader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1)
-            evaluate(testLoader, model)
+            total_acc_for_LOOCV += evaluate(testLoader, model)
+
+    print("Avg. Accuracy is {}".format(total_acc_for_LOOCV/total_num_iteration_for_LOOCV))
 
 def training(num_epochs, trainLoader,  optimizer, model, criterion):
     for epoch in range(num_epochs):
@@ -97,8 +107,9 @@ def evaluate(testLoader, model):
 
     accuracy = 100 * correct / total
 
-    # Print Loss
+    # Print Accuracy
     print('Accuracy: {}'.format(accuracy))
+    return accuracy
 
 def closeH5Files():
     for obj in gc.get_objects():  # Browse through ALL objects
@@ -111,7 +122,7 @@ def closeH5Files():
 if __name__ == "__main__":
     if sys.argv[1] != None:
         file_name = sys.argv[1].split('.')[0]
-        train(file_name)
+        train()
 
 
 

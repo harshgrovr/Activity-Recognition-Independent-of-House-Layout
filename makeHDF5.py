@@ -13,7 +13,7 @@ from dataGeneration import generateObjectChannels, generateSensorChannelForTheMi
 class Sensor():
   def __init__(self, csv_file_path, json_file_path, root_dir, transform=None):
     df = pd.read_csv(csv_file_path)
-    self.csvFile = df.iloc[:2, :]
+    self.csvFile = df.iloc[:1000, :]
     with open(json_file_path) as f:
       d = json.load(f)
     self.jsonFile = d
@@ -54,27 +54,40 @@ class Sensor():
     firstdate = self.getDate(self.csvFile.head(1).iloc[0, 0])
     lastDate = self.getDate(self.csvFile.tail(1).iloc[0,0])
     idx = 0
+
+    # loop for each entry of csv, first to last date
     while firstdate <= lastDate:
-      images = np.zeros((1, 740, 908, 22))
+      print(firstdate)
+      images = np.zeros((1, 740, 908, 4))
       labels = np.array([], dtype=np.long)
       index = 0
+      prev_sensor_values = ''
+
+
+      # Make a single file for each day
       while firstdate == self.getDate(self.csvFile.iloc[idx, 0]):
-        self.image_name = os.path.join(self.root_dir, 'AnnotatedImage', self.csvFile.iloc[idx, 0])
-        self.image = cv2.imread(self.image_name + '.png')
-        self.sensorChannel = generateSensorChannelForTheMinute(self.jsonFile, self.csvFile.iloc[idx, 0], self.csvFile, self.width, self.height, self.channel)
-        self.image = np.concatenate((self.image, self.objectChannel, self.sensorChannel), axis=2)
-        self.image = np.expand_dims(self.image, axis= 0)
+        print(idx)
+        new_sensor_values = ''
+        for val in self.csvFile.iloc[idx, 4:]:
+          new_sensor_values = ''.join((new_sensor_values, str(val)))
 
-        if self.transform:
-            self.image = self.transform(self.image)
+        if prev_sensor_values != new_sensor_values:
+          self.image_name = os.path.join(self.root_dir, 'AnnotatedImage', self.csvFile.iloc[idx, 0])
+          self.image = cv2.imread(self.image_name + '.png')
+          self.sensorChannel = generateSensorChannelForTheMinute(self.jsonFile, self.csvFile.iloc[idx, 0], self.csvFile, self.width, self.height, self.channel)
+          self.image = np.concatenate((self.image, self.sensorChannel), axis=2)
+          self.image = np.expand_dims(self.image, axis= 0)
 
-        images = np.append(images, self.image, axis = 0)
-        # get label
-        label = self.csvFile.iloc[idx, 2]
-        # Get label ID
-        label = [x for x in self.ActivityIdList if x["name"] == label]
-        label = label[0]['id']
-        labels = np.append(labels, label)
+          # get label
+          label = self.csvFile.iloc[idx, 2]
+          # Get label ID
+          label = [x for x in self.ActivityIdList if x["name"] == label]
+          self.label = label[0]['id']
+
+          prev_sensor_values = new_sensor_values
+
+        images = np.concatenate(images, self.image, axis=0)
+        labels = np.append(labels, self.label)
         idx += 1
         index += 1
 
@@ -84,7 +97,7 @@ class Sensor():
       # Create h5py file for each day
       self.h5Name = os.path.join(self.root_dir, 'h5py', firstdate.strftime('%d-%b-%Y') + '.h5')
       archive = h5py.File(self.h5Name, 'w')
-      archive.create_dataset('/images', data=images[1:,...])
+      archive.create_dataset('/images', data=images[4:,...])
       archive.create_dataset('/labels',data=labels)
       archive.create_dataset('/length', data=index)
       archive.close()
