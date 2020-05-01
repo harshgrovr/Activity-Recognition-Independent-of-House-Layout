@@ -8,10 +8,12 @@ from dataLoader import datasetHDF5
 from network import CNNModel
 import sys
 from sklearn.model_selection import LeaveOneOut
-import datetime
 import gc
+import pandas as pd
+import datetime
+from datetime import datetime
 
-def train():
+def train(file_name):
     learning_rate = 0.01
     num_epochs = 2
     total_num_iteration_for_LOOCV = 0
@@ -24,9 +26,18 @@ def train():
 
     # Get names of all h5 files
     h5Files = [f.split('.h5')[:-1] for f in os.listdir(os.path.join(os.getcwd(), 'h5py')) if f.endswith('.h5')]
+    csv_file = file_name + '.csv'
+
+    df = pd.read_csv(csv_file)
+
 
     loo = LeaveOneOut()
     h5Directory = os.path.join(os.getcwd(), 'h5py')
+    firstdate = df.iloc[0, 0]
+    if not isinstance(firstdate, datetime):
+      firstdate = datetime.strptime(firstdate, '%d-%b-%Y %H:%M:%S')
+    firstdate = firstdate.strftime('%d-%b-%Y') + '.h5'
+    objectsChannel = h5py.File(os.path.join(h5Directory, firstdate), 'r')['object']
 
     # Apply Leave one out on all the files in h5files
     for train_index, test_index in loo.split(h5Files):
@@ -35,10 +46,10 @@ def train():
         for file_index in train_index:
             closeH5Files()
 
-            date = datetime.datetime.strptime(h5Files[file_index][0], '%d-%b-%Y')
+            date = datetime.strptime(h5Files[file_index][0], '%d-%b-%Y')
             file_path = os.path.join(h5Directory, date.strftime('%d-%b-%Y') + '.h5')
 
-            dataset = datasetHDF5(curr_file_path = file_path)
+            dataset = datasetHDF5(objectsChannel, curr_file_path = file_path)
             trainLoader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1)
 
             training(num_epochs, trainLoader,  optimizer, model, criterion)
@@ -122,7 +133,7 @@ def closeH5Files():
 if __name__ == "__main__":
     if sys.argv[1] != None:
         file_name = sys.argv[1].split('.')[0]
-        train()
+        train(file_name)
 
 
 

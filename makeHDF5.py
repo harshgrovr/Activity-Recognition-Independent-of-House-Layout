@@ -54,15 +54,20 @@ class Sensor():
     firstdate = self.getDate(self.csvFile.head(1).iloc[0, 0])
     lastDate = self.getDate(self.csvFile.tail(1).iloc[0,0])
     idx = 0
+    flag = 0
 
     # loop for each entry of csv, first to last date
+
     while firstdate <= lastDate:
       print(firstdate)
-      images = np.zeros((1, 740, 908, 4))
+      zeros = np.zeros((1, 740, 908, 4))
       labels = np.array([], dtype=np.long)
       index = 0
       prev_sensor_values = ''
 
+      self.h5Name = os.path.join(self.root_dir, 'h5py', firstdate.strftime('%d-%b-%Y') + '.h5')
+      archive = h5py.File(self.h5Name, 'a')
+      archive.create_dataset('/images', data=np.zeros((1, 740, 908, 4)), compression="gzip", chunks=True, maxshape=(None, None, None, None))
 
       # Make a single file for each day
       while firstdate == self.getDate(self.csvFile.iloc[idx, 0]):
@@ -86,20 +91,23 @@ class Sensor():
 
           prev_sensor_values = new_sensor_values
 
-        images = np.concatenate(images, self.image, axis=0)
+
         labels = np.append(labels, self.label)
         idx += 1
         index += 1
+        archive['images'].resize((archive["images"].shape[0] + zeros.shape[0]), axis=0)
+        archive['images'][-zeros.shape[0]:] = self.image
+        # print(archive['images'].shape)
 
         if idx >= len(self.csvFile.index):
           break
 
-      # Create h5py file for each day
-      self.h5Name = os.path.join(self.root_dir, 'h5py', firstdate.strftime('%d-%b-%Y') + '.h5')
-      archive = h5py.File(self.h5Name, 'w')
-      archive.create_dataset('/images', data=images[4:,...])
+
       archive.create_dataset('/labels',data=labels)
       archive.create_dataset('/length', data=index)
+      if flag == 0:
+        archive.create_dataset('/object', data=self.objectChannel)
+        flag = 1
       archive.close()
 
       # Incrementing first date till it reaches to last date
