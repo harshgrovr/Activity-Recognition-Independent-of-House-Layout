@@ -57,7 +57,7 @@ class Sensor():
     while firstdate <= lastDate:
       images = np.zeros((1, 740, 908, 22))
       labels = np.array([], dtype=np.long)
-
+      index = 0
       while firstdate == self.getDate(self.csvFile.iloc[idx, 0]):
         self.image_name = os.path.join(self.root_dir, 'AnnotatedImage', self.csvFile.iloc[idx, 0])
         self.image = cv2.imread(self.image_name + '.png')
@@ -76,6 +76,7 @@ class Sensor():
         label = label[0]['id']
         labels = np.append(labels, label)
         idx += 1
+        index += 1
 
         if idx >= len(self.csvFile.index):
           break
@@ -85,10 +86,12 @@ class Sensor():
       archive = h5py.File(self.h5Name, 'w')
       archive.create_dataset('/images', data=images[1:,...])
       archive.create_dataset('/labels',data=labels)
+      archive.create_dataset('/length', data=index)
       archive.close()
 
       # Incrementing first date till it reaches to last date
       firstdate += timedelta(days=1)
+
 
 
 if __name__ == "__main__":

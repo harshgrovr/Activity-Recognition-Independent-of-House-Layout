@@ -1,41 +1,53 @@
 import h5py
-import numpy as np
 import os
 import torch
 from torch.utils.data import DataLoader
 import torch.nn as nn
 from torch.autograd import Variable
-from torch.utils.data.sampler import SubsetRandomSampler
 from dataLoader import datasetHDF5
 from network import CNNModel
 import sys
 from sklearn.model_selection import LeaveOneOut
-
+import datetime
+import gc
 
 def train(fileName):
-    iter = 0
-    test_split = .2
-    csv_file = fileName + '.csv'
+    learning_rate = 0.01
+
     model = CNNModel()
     criterion = nn.CrossEntropyLoss()
-    learning_rate = 0.01
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     h5Files = [f.split('.h5')[:-1] for f in os.listdir(os.path.join(os.getcwd(), 'h5py')) if f.endswith('.h5')]
     loo = LeaveOneOut()
+    h5Directory = os.path.join(os.getcwd(), 'h5py')
+
     for train_index, test_index in loo.split(h5Files):
-        dataset = datasetHDF5(csvFileName = csv_file, h5Directory = os.path.join(os.getcwd(), 'h5py'))
-        trainLoader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1)
-        num_epochs = 2
-        training(num_epochs, trainLoader, dataset, h5Files, optimizer, model, criterion, test_index)
+        # Train
+        for file_index in train_index:
+            closeH5Files()
 
+            date = datetime.datetime.strptime(h5Files[file_index][0], '%d-%b-%Y')
+            file_path = os.path.join(h5Directory, date.strftime('%d-%b-%Y') + '.h5')
 
-def training(num_epochs, trainLoader, dataset, h5Files, optimizer, model, criterion, test_index):
+            dataset = datasetHDF5(curr_file_path = file_path)
+            trainLoader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1)
+            num_epochs = 2
+            training(num_epochs, trainLoader,  optimizer, model, criterion)
+
+        # Test
+        for file_index in test_index:
+            closeH5Files()
+            date = datetime.datetime.strptime(h5Files[file_index][0], '%d-%b-%Y')
+            file_path = os.path.join(h5Directory, date.strftime('%d-%b-%Y') + '.h5')
+
+            dataset = datasetHDF5(curr_file_path=file_path)
+            testLoader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1)
+            evaluate(testLoader, model)
+
+def training(num_epochs, trainLoader,  optimizer, model, criterion):
     for epoch in range(num_epochs):
         for i, (image, label) in enumerate(trainLoader):
-            if dataset.startDate.strftime('%d-%b-%Y') == h5Files[test_index[0]][0]:
-                continue
-            print(dataset.startDate.strftime('%d-%b-%Y'), h5Files[test_index[0]][0])
             image = image.permute(0, 3, 1, 2)  # from NHWC to NCHW
             image = Variable(image.float())
             label = Variable(label)
@@ -55,14 +67,13 @@ def training(num_epochs, trainLoader, dataset, h5Files, optimizer, model, criter
             # Updating parameters
             optimizer.step()
 
-            # Print Loss
-            # if epoch % 5 == 0:
-            #     print('Iteration: {}. Loss: {}'.format(iter, loss.data[0]))
-    testLoader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1)
-    evaluate(testLoader, model, test_index)
+            # Print Epoch and Loss
+            if epoch % 5 == 0:
+                print('epoch: {} Loss: {}'.format(epoch, loss))
+
 
 # Calculate Accuracy
-def evaluate(testLoader, model, test_index):
+def evaluate(testLoader, model):
 
     correct = 0
     total = 0
@@ -89,6 +100,13 @@ def evaluate(testLoader, model, test_index):
     # Print Loss
     print('Accuracy: {}'.format(accuracy))
 
+def closeH5Files():
+    for obj in gc.get_objects():  # Browse through ALL objects
+        if isinstance(obj, h5py.File):  # Just HDF5 files
+            try:
+                obj.close()
+            except:
+                pass  # Was already closed
 
 if __name__ == "__main__":
     if sys.argv[1] != None:
