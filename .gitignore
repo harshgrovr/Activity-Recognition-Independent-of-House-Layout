@@ -1,2 +1,2 @@
-*.h5
+h5py/*.h5
 AnnotatedImage/

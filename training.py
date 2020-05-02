@@ -61,7 +61,7 @@ def train(file_name):
             file_path = os.path.join(h5Directory, date.strftime('%d-%b-%Y') + '.h5')
 
             dataset = datasetHDF5(curr_file_path=file_path)
-            testLoader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1)
+            testLoader = DataLoader(dataset, batch_size=16, shuffle=False, num_workers=2)
             total_acc_for_LOOCV += evaluate(testLoader, model)
 
     print("Avg. Accuracy is {}".format(total_acc_for_LOOCV/total_num_iteration_for_LOOCV))
@@ -90,7 +90,7 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion):
 
             # Print Epoch and Loss
             if epoch % 5 == 0:
-                print('epoch: {} Loss: {}'.format(epoch, loss))
+                print(' epoch: {} Batch_no: {} Loss: {}'.format(epoch, i, loss))
 
 
 # Calculate Accuracy
