@@ -14,15 +14,16 @@ import datetime
 from datetime import datetime
 
 def train(file_name):
-    learning_rate = 0.01
+    learning_rate = 0.0001
     num_epochs = 2
     total_num_iteration_for_LOOCV = 0
     total_acc_for_LOOCV = 0
+    decay = 1e-6
 
     # Defining Model, Optimizer and Loss
     model = CNNModel()
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=decay)
 
     # Get names of all h5 files
     h5Files = [f.split('.h5')[:-1] for f in os.listdir(os.path.join(os.getcwd(), 'h5py')) if f.endswith('.h5')]
@@ -37,8 +38,8 @@ def train(file_name):
     if not isinstance(firstdate, datetime):
       firstdate = datetime.strptime(firstdate, '%d-%b-%Y %H:%M:%S')
     firstdate = firstdate.strftime('%d-%b-%Y') + '.h5'
-    objectsChannel = h5py.File(os.path.join(h5Directory, firstdate), 'r')['object']
-
+    objectsChannel = h5py.File(os.path.join(h5Directory, firstdate), 'r')['object'].value
+    closeH5Files()
     # Apply Leave one out on all the files in h5files
     for train_index, test_index in loo.split(h5Files):
         total_num_iteration_for_LOOCV += 1
@@ -61,7 +62,7 @@ def train(file_name):
             file_path = os.path.join(h5Directory, date.strftime('%d-%b-%Y') + '.h5')
 
             dataset = datasetHDF5(curr_file_path=file_path)
-            testLoader = DataLoader(dataset, batch_size=16, shuffle=False, num_workers=2)
+            testLoader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1)
             total_acc_for_LOOCV += evaluate(testLoader, model)
 
     print("Avg. Accuracy is {}".format(total_acc_for_LOOCV/total_num_iteration_for_LOOCV))

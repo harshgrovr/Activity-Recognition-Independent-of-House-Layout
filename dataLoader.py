@@ -9,7 +9,7 @@ class datasetHDF5(Dataset):
         self.h5_path = curr_file_path
         self.h5File = h5py.File(self.h5_path, 'r')
         self.length = self.h5File['length'].value
-        self.objectChannel = objectChannel.value
+        self.objectChannel = objectChannel
 
     def __getitem__(self, idx):
         input = self.h5File['images'][idx, :, :, :]
