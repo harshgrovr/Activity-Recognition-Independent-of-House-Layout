@@ -1,3 +1,4 @@
+import collections
 import os
 import torch
 from torch.utils.data import DataLoader
@@ -8,6 +9,11 @@ import pandas as pd
 import datetime
 from datetime import datetime
 from network import LSTMModel
+import numpy as np
+import seaborn as sn
+import pandas as pd
+from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
 from dataLoader import datasetCSV
 
 
@@ -28,10 +34,7 @@ def getUniqueStartIndex(df):
     s = df['start']
     return s[s.diff().dt.days != 0].index.values
 
-# Create sequence of input and output depending upon the window size
-def create_inout_sequences(input_data, label, tw):
-    inout_seq = []
-
+def getIDFromClassName(train_label):
     ActivityIdList = [
 
         {"name": "idle", "id": 0},
@@ -53,21 +56,24 @@ def create_inout_sequences(input_data, label, tw):
         {"name": "eatDinner", "id": 16},
         {"name": "eatBreakfast", "id": 17}
     ]
+    train_label = [x for x in ActivityIdList if x["name"] == train_label]
+    return train_label[0]['id']
 
+# Create sequence of input and output depending upon the window size
+def create_inout_sequences(input_data, label, tw ):
+    inout_seq = []
     L = len(input_data)
     for i in range(L-tw):
         train_seq = input_data.iloc[i:i+tw, ~input_data.columns.isin(['activity', 'start', 'end'])]
         train_seq = train_seq.values
         train_label = label.iloc[i+tw:i+tw+1]
         train_label = train_label.values
-        train_label = [x for x in ActivityIdList if x["name"] == train_label]
-        train_label = train_label[0]['id']
+        train_label = getIDFromClassName(train_label)
         inout_seq.append((train_seq, train_label))
     return inout_seq
 
-
-def train(file_name):
-    learning_rate = 1e-2
+def train(file_name, ActivityIdList):
+    learning_rate = 1e-3
     num_epochs = 50
     decay = 1e-6
 
@@ -82,8 +88,22 @@ def train(file_name):
 
     csv_file = file_name + '.csv'
     df = pd.read_csv(csv_file)
-    uniqueIndex = getUniqueStartIndex(df)
+    # Get class Frequency as a dictionary
+    classFrequencyDict = df['activity'].value_counts().to_dict()
+    temp_dict ={}
+    # Initialize the dict and set frequ value 0 intially because weight tensor in Loss requires all the classes values
+    for dict in ActivityIdList:
+        temp_dict[dict['id']] = 0
 
+    # make of classLabel and frequency
+    for className, frequency in classFrequencyDict.items():
+        classLabel = getIDFromClassName(className)
+        temp_dict[classLabel] = frequency
+
+    # Sort it according to the class labels
+    classFrequenciesList = np.array([value for key, value in sorted(temp_dict.items())])
+    classFrequenciesList = classFrequenciesList/np.sum(classFrequenciesList)
+    uniqueIndex = getUniqueStartIndex(df)
     loo = LeaveOneOut()
     print('Total splits: ', len(uniqueIndex) - 1)
     print('Total Epochs per split:', num_epochs)
@@ -94,7 +114,12 @@ def train(file_name):
         if torch.cuda.is_available():
             model.cuda()
         print('cuda available: ', torch.cuda.is_available())
-        criterion = nn.CrossEntropyLoss()
+        if torch.cuda.is_available():
+            class_weights = torch.tensor(classFrequenciesList).float().cuda()
+        else:
+            class_weights = torch.tensor(classFrequenciesList).float()
+
+        criterion = nn.CrossEntropyLoss(weight = class_weights)
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=decay)
 
         # Get start and end of test dataset
@@ -125,8 +150,8 @@ def train(file_name):
             test_inputs = df[start - seq_dim: end]
             test_labels = df['activity'][start - seq_dim: end]
             testData = create_inout_sequences(test_inputs, test_labels, seq_dim)
-            testLoader = DataLoader(testData, batch_size=128, shuffle=True, num_workers=8)
-            total_acc_for_LOOCV += evaluate(testLoader, model, seq_dim, input_dim)
+            testLoader = DataLoader(testData, batch_size=128, shuffle=False, num_workers=8)
+            total_acc_for_LOOCV += evaluate(testLoader, model, seq_dim, input_dim, len(ActivityIdList))
 
     print('avg accuracy i: ,', (total_acc_for_LOOCV/(total_num_iteration_for_LOOCV - 1)), '%')
 
@@ -147,7 +172,7 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
             output = model(input)
 
             # Calculate Loss: softmax --> cross entropy loss
-            loss = criterion(output, label)
+            loss = criterion(output, label)#weig pram
             running_loss += loss
             loss = loss / accumulation_steps  # Normalize our loss (if averaged)
             loss.backward()  # Backward pass
@@ -162,7 +187,10 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
 
 
 # Evaluate the network
-def evaluate(testLoader, model, seq_dim, input_dim):
+def evaluate(testLoader, model, seq_dim, input_dim, nb_classes):
+    # Initialize the prediction and label lists(tensors)
+    predlist = torch.zeros(0, dtype=torch.long, device='cpu')
+    lbllist = torch.zeros(0, dtype=torch.long, device='cpu')
 
     correct = 0
     total = 0
@@ -189,6 +217,19 @@ def evaluate(testLoader, model, seq_dim, input_dim):
                 correct += (predicted.cpu() == labels.cpu()).sum()
             else:
                 correct += (predicted == labels).sum()
+            # Append batch prediction results
+            predlist = torch.cat([predlist, predicted.view(-1).cpu()])
+            lbllist = torch.cat([lbllist, labels.view(-1).cpu()])
+
+    # Confusion matrix
+    conf_mat = confusion_matrix(lbllist.numpy(), predlist.numpy())
+    print(conf_mat)
+
+    df_cm = pd.DataFrame(conf_mat, index=[i for i in range(conf_mat.shape[0])],
+                         columns=[i for i in range(conf_mat.shape[0])])
+    plt.figure(figsize=(10, 7))
+    sn.heatmap(df_cm, annot=True)
+    plt.show()
 
     accuracy = 100 * correct / total
 
@@ -197,8 +238,29 @@ def evaluate(testLoader, model, seq_dim, input_dim):
     return accuracy
 if __name__ == "__main__":
     if sys.argv[1] != None:
+        ActivityIdList = [
+
+            {"name": "idle", "id": 0},
+            {"name": "leaveHouse", "id": 1},
+            {"name": "useToilet", "id": 2},
+            {"name": "takeShower", "id": 3},
+            {"name": "brushTeeth", "id": 4},
+            {"name": "goToBed", "id": 5},
+            {"name": "getDressed", "id": 6},
+            {"name": "prepareBreakfast", "id": 7},
+            {"name": "prepareDinner", "id": 8},
+            {"name": "getSnack", "id": 9},
+            {"name": "getDrink", "id": 10},
+            {"name": "loadDishwasher", "id": 11},
+            {"name": "unloadDishwasher", "id": 12},
+            {"name": "storeGroceries", "id": 13},
+            {"name": "washDishes", "id": 14},
+            {"name": "answerPhone", "id": 15},
+            {"name": "eatDinner", "id": 16},
+            {"name": "eatBreakfast", "id": 17}
+        ]
         file_name = sys.argv[1].split('.')[0]
-        train(file_name)
+        train(file_name, ActivityIdList)
 
 
 
