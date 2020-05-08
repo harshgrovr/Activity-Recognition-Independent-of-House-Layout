@@ -11,7 +11,6 @@ from itertools import islice
 import glob
 
 
-
 def JSON_to_CSV(file):
     with open(file) as f:
         d = json.load(f)
@@ -259,7 +258,9 @@ def annotateImage(file, imagePath= '', minutesToGenrate = 100):
         annoatedImageDir = os.path.join(os.getcwd(), 'AnnotatedImage')
     else:
         annoatedImageDir = os.path.join(os.getcwd(), 'AnnotatedImage')
+        print('total files to generate: ', minutesToGenrate)
     for index, row in df.iterrows():
+        print('generating image file:',index)
         image = cv2.imread(imagePath)
         activatedSensorNames = df.columns[df.iloc[index, :] == 1]
         rectangleDict = sensorLocation(jsonFile, activatedSensorNames)
@@ -449,19 +450,19 @@ if __name__ == "__main__":
         sortDictionary(sys.argv[1], 'activityData')
 
         # Convert JSON to CSV
-        JSON_to_CSV(sys.argv[1])
+        # JSON_to_CSV(sys.argv[1])
 
         # # Generate Dictionary Template for Annotations
-        generateBaseImage(sys.argv[1], file_name + '.png', width1=908, height1= 740)
+        # generateBaseImage(sys.argv[1], file_name + '.png', width1=908, height1= 740)
 
         # # Generate an Image named Annoation.png , showing all the sensors and objects
-        generateImagewithAllAnnoations(sys.argv[1], file_name + '.png')
+        # generateImagewithAllAnnoations(sys.argv[1], file_name + '.png')
 
         # # Make a folder and save all the annotated Image per minute bases
-        annotateImage(sys.argv[1], file_name + '.png', minutesToGenrate = 1000)
+        annotateImage(sys.argv[1], file_name + '.png', minutesToGenrate = 2000)
 
         # # Generate a video on above generated Image
-        makeVideo(os.path.join(os.getcwd(), 'AnnotatedImage'), fps=10)
+        # makeVideo(os.path.join(os.getcwd(), 'AnnotatedImage'), fps=10)
 
 
 

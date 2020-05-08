@@ -13,7 +13,7 @@ from dataGeneration import generateObjectChannels, generateSensorChannelForTheMi
 class Sensor():
   def __init__(self, csv_file_path, json_file_path, root_dir, transform=None):
     df = pd.read_csv(csv_file_path)
-    self.csvFile = df.iloc[:1000, :]
+    self.csvFile = df.iloc[:2000, :]
     with open(json_file_path) as f:
       d = json.load(f)
     self.jsonFile = d
@@ -67,7 +67,7 @@ class Sensor():
 
       self.h5Name = os.path.join(self.root_dir, 'h5py', firstdate.strftime('%d-%b-%Y') + '.h5')
       archive = h5py.File(self.h5Name, 'a')
-      archive.create_dataset('/images', data=np.zeros((1, 740, 908, 4)), compression="gzip", chunks=True, maxshape=(None, None, None, None))
+      archive.create_dataset('/images', data=np.empty((1, 740, 908, 4)), compression="gzip", chunks=True, maxshape=(None, None, None, None))
 
       # Make a single file for each day
       while firstdate == self.getDate(self.csvFile.iloc[idx, 0]):
@@ -91,13 +91,16 @@ class Sensor():
 
           prev_sensor_values = new_sensor_values
 
+        if idx != 0:
+          archive['images'].resize((archive["images"].shape[0] + zeros.shape[0]), axis=0)
+
+        archive['images'][-zeros.shape[0]:] = self.image
+
 
         labels = np.append(labels, self.label)
         idx += 1
         index += 1
-        archive['images'].resize((archive["images"].shape[0] + zeros.shape[0]), axis=0)
-        archive['images'][-zeros.shape[0]:] = self.image
-        # print(archive['images'].shape)
+
 
         if idx >= len(self.csvFile.index):
           break

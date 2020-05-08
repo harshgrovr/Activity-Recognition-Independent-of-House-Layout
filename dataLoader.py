@@ -2,6 +2,7 @@ import torch
 from torch.utils.data import Dataset
 import h5py
 import numpy as np
+import pandas as pd
 
 class datasetHDF5(Dataset):
     def __init__(self,objectChannel, curr_file_path, ):
@@ -24,6 +25,21 @@ class datasetHDF5(Dataset):
         return self.length
 
 
+class datasetCSV(Dataset):
+    def __init__(self, trainData, seq_dim):
+        super(datasetCSV, self).__init__()
+        self.csv_input = trainData
+        self.seq_dim = seq_dim
+
+    def __getitem__(self, idx):
+        self.input = self.csv_input[idx][0]
+        self.label = self.csv_input[idx][1]
+        self.input = torch.as_tensor(np.array(self.input).astype('float'))
+        self.label = torch.as_tensor(np.array(self.label).astype('long'))
+        return self.input, self.label
+
+    def __len__(self):
+        return len(self.csv_input) - self.seq_dim + 1
 
 
 
