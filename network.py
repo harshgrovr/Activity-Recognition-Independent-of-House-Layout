@@ -30,8 +30,19 @@ class CNNModel(nn.Module):
 
 
 class LSTMModel(nn.Module):
+    def init_hidden(self, batch_size):
+        self.batch_size = batch_size
+        if torch.cuda.is_available():
+            hn = torch.zeros(self.layer_dim, self.batch_size, self.hidden_dim).cuda()
+            # Initialize cell state
+            cn = torch.zeros(self.layer_dim, self.batch_size, self.hidden_dim).cuda()
+        else:
+            hn = torch.zeros(self.layer_dim, self.batch_size, self.hidden_dim)
+            # Initialize cell state
+            cn = torch.zeros(self.layer_dim, self.batch_size, self.hidden_dim)
+        return hn, cn
 
-    def __init__(self, input_dim, hidden_dim, layer_dim, output_dim):
+    def __init__(self, input_dim, hidden_dim, layer_dim, output_dim, seq_dim):
         super(LSTMModel, self).__init__()
         # Hidden dimensions
         self.hidden_dim = hidden_dim
@@ -39,35 +50,30 @@ class LSTMModel(nn.Module):
         # Number of hidden layers
         self.layer_dim = layer_dim
 
+        self.input_dim = input_dim
         # Building your LSTM
         # batch_first=True causes input/output tensors to be of shape
         # (batch_dim, seq_dim, feature_dim)
-        self.lstm = nn.LSTM(input_dim, hidden_dim, layer_dim, batch_first=True)
+        self.lstm = nn.LSTM(self.input_dim, hidden_dim, layer_dim, batch_first=True)
 
         # Readout layer
         self.fc = nn.Linear(hidden_dim, output_dim)
         self.relu = nn.ReLU()
         self.softmax = nn.Softmax(dim=1)
+        self.seq_dim = seq_dim
 
-    def forward(self, x):
+
+    def forward(self, inputs):
         # Initialize hidden state with zeros
-
-        if torch.cuda.is_available():
-            h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).cuda()
-            # Initialize cell state
-            c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).cuda()
-
-        else:
-            h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim)
-            # Initialize cell state
-            c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim)
+        input, (hn, cn) = inputs
+        input = input.view(-1, self.seq_dim, self.input_dim)
 
         # time steps
-        out, (hn, cn) = self.lstm(x, (h0, c0))
+        out, (hn, cn) = self.lstm(input, (hn, cn))
 
         # Index hidden state of last time step
         out = self.relu(self.fc(out[:, -1, :]))
         out = self.softmax(out)
-        return out
+        return out, (hn,cn)
 
 

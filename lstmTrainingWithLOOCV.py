@@ -1,6 +1,7 @@
 import collections
 import os
 import torch
+from torch.autograd import Variable
 from torch.utils.data import DataLoader
 import torch.nn as nn
 import sys
@@ -73,8 +74,8 @@ def create_inout_sequences(input_data, label, tw ):
     return inout_seq
 
 def train(file_name, ActivityIdList):
-    learning_rate = 1e-3
-    num_epochs = 50
+    learning_rate = 1e-4
+    num_epochs = 100
     decay = 1e-6
 
     # Defining Model, Optimizer and Loss
@@ -82,7 +83,8 @@ def train(file_name, ActivityIdList):
     hidden_dim = 100
     layer_dim = 2
     output_dim = 18
-    seq_dim = 128
+    seq_dim = 5
+    batch_size = 128
     total_num_iteration_for_LOOCV = 0
     total_acc_for_LOOCV = 0
 
@@ -110,7 +112,7 @@ def train(file_name, ActivityIdList):
 
     for train_index, test_index in loo.split(uniqueIndex):
 
-        model = LSTMModel(input_dim, hidden_dim, layer_dim, output_dim)
+        model = LSTMModel(input_dim, hidden_dim, layer_dim, output_dim, seq_dim)
         if torch.cuda.is_available():
             model.cuda()
         print('cuda available: ', torch.cuda.is_available())
@@ -142,25 +144,33 @@ def train(file_name, ActivityIdList):
 
         # Make Train DataLoader
         trainDataset = datasetCSV(trainData, seq_dim)
-        trainLoader = DataLoader(trainDataset, batch_size=128, shuffle=False, num_workers=8)
-        training(num_epochs, trainLoader, optimizer, model, criterion, seq_dim, input_dim)
+        trainLoader = DataLoader(trainDataset, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=True)
+        training(num_epochs, trainLoader, optimizer, model, criterion, seq_dim, input_dim, batch_size)
 
         # Generate Test DataLoader
         if start - seq_dim > 0:
             test_inputs = df[start - seq_dim: end]
             test_labels = df['activity'][start - seq_dim: end]
             testData = create_inout_sequences(test_inputs, test_labels, seq_dim)
-            testLoader = DataLoader(testData, batch_size=128, shuffle=False, num_workers=8)
-            total_acc_for_LOOCV += evaluate(testLoader, model, seq_dim, input_dim, len(ActivityIdList))
+            testLoader = DataLoader(testData, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=True)
+            total_acc_for_LOOCV += evaluate(testLoader, model, seq_dim, input_dim, len(ActivityIdList), batch_size=batch_size)
 
     print('avg accuracy i: ,', (total_acc_for_LOOCV/(total_num_iteration_for_LOOCV - 1)), '%')
 
 # Train the Network
-def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, input_dim, accumulation_steps=5):
+def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, input_dim, batch_size,accumulation_steps=5):
+    hidden_dim = 100
+    layer_dim = 2
+    output_dim = 18
     for epoch in range(num_epochs):
+        hn, cn = model.init_hidden(batch_size)
+        flag = True
         running_loss = 0
         for i, (input, label) in enumerate(trainLoader):
+            hn.detach_()
+            cn.detach_()
             input = input.view(-1, seq_dim, input_dim)
+
             if torch.cuda.is_available():
                 input = input.float().cuda()
                 label = label.cuda()
@@ -168,8 +178,12 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
                 input = input.float()
                 label = label
 
+            if flag:  # beginning of sequence of data you want cell states from or when no longer need past cell state and starting fresh again
+                flag = False
+                hn, cn = model.init_hidden(batch_size)
+
             # Forward pass to get output/logits
-            output = model(input)
+            output, (hn, cn) = model((input, (hn, cn)))
 
             # Calculate Loss: softmax --> cross entropy loss
             loss = criterion(output, label)#weig pram
@@ -180,14 +194,17 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
                 optimizer.step()  # Now we can do an optimizer step
                 optimizer.zero_grad()  # Reset gradients tensors
 
-            if i % 10 == 9:  # print every 100 mini-batches
+            if i % 10 == 0:  # print every 10 mini-batches
                 print('[%d, %5d] loss: %.3f' %
                       (epoch + 1, i + 1, running_loss / 10))
                 running_loss = 0.0
+                # flag = True
+
+
 
 
 # Evaluate the network
-def evaluate(testLoader, model, seq_dim, input_dim, nb_classes):
+def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
     # Initialize the prediction and label lists(tensors)
     predlist = torch.zeros(0, dtype=torch.long, device='cpu')
     lbllist = torch.zeros(0, dtype=torch.long, device='cpu')
@@ -195,8 +212,11 @@ def evaluate(testLoader, model, seq_dim, input_dim, nb_classes):
     correct = 0
     total = 0
     # Iterate through test dataset
+    hn, cn = model.init_hidden(batch_size)
     with torch.no_grad():
         for input, labels in testLoader:
+            hn.detach_()
+            cn.detach_()
             input = input.view(-1, seq_dim, input_dim)
             # Load images to a Torch Variable
             if torch.cuda.is_available():
@@ -205,10 +225,10 @@ def evaluate(testLoader, model, seq_dim, input_dim, nb_classes):
                 input = input.float()
 
             # Forward pass only to get logits/output
-            outputs = model(input)
+            output, (hn, cn) = model((input, (hn, cn)))
 
             # Get predictions from the maximum value
-            _, predicted = torch.max(outputs, 1)
+            _, predicted = torch.max(output, 1)
             # Total number of labels
             total += labels.size(0)
             # Total correct predictions
