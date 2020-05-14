@@ -132,6 +132,7 @@ def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, 
     writer = SummaryWriter('../logs')
 
     for epoch in range(num_epochs):
+        print('epoch', epoch)
         for j in range(len(randomDaySelected)):
             # generate train sequence list based upon above dataframe.
             time_to_start_from = randomDaySelected[j]
@@ -175,6 +176,13 @@ def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, 
             for tag, value in model.named_parameters():
                 tag = tag.replace('.', '/')
                 writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + 1)
+
+      # Save weights
+        for key in model.lstm.state_dict():
+            writer.add_histogram(key, model.lstm.state_dict()[key].data.cpu().numpy(), epoch + 1)
+        for key in model.fc.state_dict():
+            writer.add_histogram(key, model.fc.state_dict()[key].data.cpu().numpy(), epoch + 1)
+
 # Evaluate the network
 def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
     # Initialize the prediction and label lists(tensors)
