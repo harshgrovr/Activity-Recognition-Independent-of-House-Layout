@@ -90,8 +90,9 @@ def train(file_name, ActivityIdList):
 
     # Sort it according to the class labels
     classFrequenciesList = np.array([value for key, value in sorted(temp_dict.items())])
-    classFrequenciesList = classFrequenciesList/np.sum(classFrequenciesList)
-
+    classFrequenciesList = np.max(classFrequenciesList)/classFrequenciesList
+    classFrequenciesList[classFrequenciesList == np.inf] = 0
+    print(classFrequenciesList)
     if torch.cuda.is_available():
         class_weights = torch.tensor(classFrequenciesList).float().cuda()
     else:
@@ -111,10 +112,9 @@ def train(file_name, ActivityIdList):
     training(config['num_epochs'],trainDataFrame, optimizer, model, criterion, config['seq_dim'], config['input_dim'], config['batch_size'], df)
 
     # Generate Test DataLoader
-    testData = create_inout_sequences(testDataFrame, config['seq_dim'])
+    testData = create_inout_sequences(trainDataFrame, config['seq_dim'])
     testLoader = DataLoader(testData, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'], drop_last=True)
     evaluate(testLoader, model, config['seq_dim'], config['input_dim'], len(ActivityIdList), batch_size = config['batch_size'])
-
 
 # Train the Network
 def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, input_dim, batch_size, df,accumulation_steps=5):
@@ -173,9 +173,9 @@ def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, 
                           (epoch + 1, i + 1, running_loss / 10))
                     running_loss = 0.0
 
-            for tag, value in model.named_parameters():
-                tag = tag.replace('.', '/')
-                writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + 1)
+        for tag, value in model.named_parameters():
+            tag = tag.replace('.', '/')
+            writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + 1)
 
       # Save weights
         for key in model.lstm.state_dict():
@@ -237,10 +237,11 @@ def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
     # Print Accuracy
     print('Accuracy: {}'.format(accuracy))
     return accuracy
+
 if __name__ == "__main__":
     if sys.argv[1] != None:
         ActivityIdList = config['ActivityIdList']
-        file_name = '../houseB'
+        file_name = 'houseB'
         # file_name = sys.argv[1].split('.')[0]
         train(file_name, ActivityIdList)
 
