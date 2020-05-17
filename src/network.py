@@ -70,7 +70,6 @@ class LSTMModel(nn.Module):
 
         # time steps
         out, (hn, cn) = self.lstm(input, (hn, cn))
-
         # Index hidden state of last time step
         out = self.relu(self.fc(out[:, -1, :]))
         out = self.softmax(out)

@@ -7,6 +7,7 @@ import sys
 from sklearn.model_selection import LeaveOneOut
 import datetime
 from datetime import datetime
+from torch.utils.data.sampler import Sampler, WeightedRandomSampler
 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -51,23 +52,17 @@ def create_inout_sequences(input_data, tw ):
     for i in range(L-tw):
         train_seq = input_data.iloc[i:i+tw, ~input_data.columns.isin(['activity', 'start', 'end'])]
         train_seq = train_seq.values
-        train_label = input_data.iloc[i+tw:i+tw+1, input_data.columns.isin(['activity'])]
+        train_label = input_data.iloc[i:i+tw, input_data.columns.isin(['activity'])]
         train_label = train_label.values
-        train_label = getIDFromClassName(train_label)
+        train_label = np.max([len(np.where(train_label == t)[0]) for t in np.unique(train_label)])
         inout_seq.append((train_seq, train_label))
     return inout_seq
 
 def splitDatasetIntoTrainAndTest(df):
     testDataFrame = pd.DataFrame([])
     trainDataFrame = pd.DataFrame([])
-    uniqueIndex = getUniqueStartIndex(df)
-    for index in range(len(uniqueIndex)):
-        # Get starting and ending index of a day
-        start, end = getStartAndEndIndex(df, uniqueIndex[index])
-        split = int(config['split_ratio'] * (end - start))
-        trainDataFrame = trainDataFrame.append(df[start : start + split], ignore_index= True)
-        testDataFrame = testDataFrame.append(df[start + split : end], ignore_index= True)
-
+    trainDataFrame = df[0 : int(df.shape[0] * config['split_ratio'])]
+    testDataFrame = df[int(df.shape[0] * config['split_ratio']) : df.shape[0]]
     return trainDataFrame, testDataFrame
 
 def train(file_name, ActivityIdList):
@@ -92,7 +87,6 @@ def train(file_name, ActivityIdList):
     classFrequenciesList = np.array([value for key, value in sorted(temp_dict.items())])
     classFrequenciesList = np.max(classFrequenciesList)/classFrequenciesList
     classFrequenciesList[classFrequenciesList == np.inf] = 0
-    print(classFrequenciesList)
     if torch.cuda.is_available():
         class_weights = torch.tensor(classFrequenciesList).float().cuda()
     else:
@@ -109,7 +103,7 @@ def train(file_name, ActivityIdList):
     # Split the data into test and train
     trainDataFrame, testDataFrame  = splitDatasetIntoTrainAndTest(df)
 
-    training(config['num_epochs'],trainDataFrame, optimizer, model, criterion, config['seq_dim'], config['input_dim'], config['batch_size'], df)
+    training(config['num_epochs'], trainDataFrame, optimizer, model, criterion, config['seq_dim'], config['input_dim'], config['batch_size'], df)
 
     # Generate Test DataLoader
     testData = create_inout_sequences(trainDataFrame, config['seq_dim'])
@@ -117,36 +111,47 @@ def train(file_name, ActivityIdList):
     evaluate(testLoader, model, config['seq_dim'], config['input_dim'], len(ActivityIdList), batch_size = config['batch_size'])
 
 # Train the Network
-def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, input_dim, batch_size, df,accumulation_steps=5):
+def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, input_dim, batch_size, df):
     minutesToRunFor = []
     randomDaySelected = []
 
     # for each random run select the random point and minute to run for
     # do this for each random point
-    for number in getUniqueStartIndex(df):
-        start, end = getStartAndEndIndex(df, number)
+    for number in getUniqueStartIndex(trainDataFrame):
+        start, end = getStartAndEndIndex(trainDataFrame, number)
         number = random.sample(range(start, end - config['seq_dim']), 1)[0]
         randomDaySelected.append(number)
         minutesToRunFor.append(end - number)
-
     writer = SummaryWriter('../logs')
-
     for epoch in range(num_epochs):
         print('epoch', epoch)
         for j in range(len(randomDaySelected)):
             # generate train sequence list based upon above dataframe.
             time_to_start_from = randomDaySelected[j]
             minutes_to_run = minutesToRunFor[j]
-            trainData = create_inout_sequences(trainDataFrame[time_to_start_from: time_to_start_from + minutes_to_run], config['seq_dim'])
+            trainData = create_inout_sequences(trainDataFrame[time_to_start_from : time_to_start_from + minutes_to_run], config['seq_dim'])
+
+            target = [trainData[x][1] for x in range(len(trainData))]
+            class_sample_count = []
+            for t in np.unique(target):
+                class_sample_count.append([t, len(np.where(target == t)[0])])
+
+            weights = np.zeros(np.max(target) + 1)
+            for val in class_sample_count:
+                weights[val[0]] = 1/val[1]
+
+            samples_weights = np.array([weights[t] for t in target])
+
+            sampler = WeightedRandomSampler(weights=samples_weights,num_samples=len(samples_weights))
+
             # Make Train DataLoader
             trainDataset = datasetCSV(trainData, config['seq_dim'])
             trainLoader = DataLoader(trainDataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'],
-                                     drop_last=True)
-            hn, cn = model.init_hidden(batch_size)
+                                     drop_last=True, sampler = sampler)
+
             running_loss = 0
             for i, (input, label) in enumerate(trainLoader):
-                hn.detach_()
-                cn.detach_()
+                hn, cn = model.init_hidden(batch_size)
                 input = input.view(-1, seq_dim, input_dim)
 
                 if torch.cuda.is_available():
@@ -162,13 +167,13 @@ def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, 
                 # Calculate Loss: softmax --> cross entropy loss
                 loss = criterion(output, label)#weig pram
                 running_loss += loss
-                loss = loss / accumulation_steps  # Normalize our loss (if averaged)
+                loss = loss / config["accumulation_steps"]  # Normalize our loss (if averaged)
                 loss.backward()  # Backward pass
-                if (i) % accumulation_steps == 0:  # Wait for several backward steps
+                if (i) % config["accumulation_steps"] -1 == 0:  # Wait for several backward steps
                     optimizer.step()  # Now we can do an optimizer step
                     optimizer.zero_grad()  # Reset gradients tensors
 
-                if i % 10 == 0:  # print every 10 mini-batches
+                if i % 30 == 29:  # print every 10 mini-batches
                     print('[%d, %5d] loss: %.3f' %
                           (epoch + 1, i + 1, running_loss / 10))
                     running_loss = 0.0
@@ -188,6 +193,7 @@ def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
     # Initialize the prediction and label lists(tensors)
     predlist = torch.zeros(0, dtype=torch.long, device='cpu')
     lbllist = torch.zeros(0, dtype=torch.long, device='cpu')
+
 
     correct = 0
     total = 0
@@ -223,8 +229,8 @@ def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
             lbllist = torch.cat([lbllist, labels.view(-1).cpu()])
 
     # Confusion matrix
-    # conf_mat = confusion_matrix(lbllist.numpy(), predlist.numpy())
-    # print(conf_mat)
+    conf_mat = confusion_matrix(lbllist.numpy(), predlist.numpy())
+    print(conf_mat)
 
     # df_cm = pd.DataFrame(conf_mat, index=[i for i in range(conf_mat.shape[0])],
     #                      columns=[i for i in range(conf_mat.shape[0])])
@@ -241,7 +247,7 @@ def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
 if __name__ == "__main__":
     if sys.argv[1] != None:
         ActivityIdList = config['ActivityIdList']
-        file_name = 'houseB'
+        file_name = '../houseB'
         # file_name = sys.argv[1].split('.')[0]
         train(file_name, ActivityIdList)
 

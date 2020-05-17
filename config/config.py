@@ -2,16 +2,17 @@
 
 config = {
 "learning_rate" : 1e-3,
-"num_epochs" : 20,
+"num_epochs" : 100,
 "decay" : 1e-6,
 "input_dim" : 23,
 "hidden_dim" : 100,
 "layer_dim" : 2,
 "output_dim" : 18,
 "seq_dim" : 5,
-"batch_size" : 128,
+"batch_size" : 8,
 "split_ratio" : 2/3,
 "num_workers":8,
+"accumulation_steps": 20,
 "ActivityIdList" :  [
 
             {"name": "idle", "id": 0},
