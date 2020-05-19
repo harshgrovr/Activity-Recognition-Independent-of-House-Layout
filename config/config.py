@@ -1,18 +1,18 @@
 #!/usr/bin/env python
 
 config = {
-"learning_rate" : 1e-3,
+"learning_rate" : 5e-3,
 "num_epochs" : 100,
 "decay" : 1e-6,
 "input_dim" : 23,
 "hidden_dim" : 100,
-"layer_dim" : 2,
+"layer_dim" : 3,
 "output_dim" : 18,
-"seq_dim" : 5,
-"batch_size" : 8,
+"seq_dim" : 10,
+"batch_size" : 16,
 "split_ratio" : 2/3,
 "num_workers":8,
-"accumulation_steps": 20,
+"accumulation_steps": 8,
 "ActivityIdList" :  [
 
             {"name": "idle", "id": 0},
