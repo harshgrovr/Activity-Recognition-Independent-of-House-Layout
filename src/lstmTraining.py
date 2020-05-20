@@ -123,7 +123,7 @@ def train(file_name, ActivityIdList):
     start_epoch = 0
     if os.path.isfile(path):
         print("=> loading checkpoint '{}'".format(path))
-        checkpoint = torch.load(path, map_location=torch.device('cpu'))
+        checkpoint = torch.load(path)
         model.load_state_dict(checkpoint['state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer'])
         start_epoch += checkpoint['epoch']
@@ -141,7 +141,7 @@ def train(file_name, ActivityIdList):
     testLoader = DataLoader(testData, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'],
                             drop_last=True)
 
-    # training(config['num_epochs'], trainDataFrame, optimizer, model, criterion, config['seq_dim'], config['input_dim'], config['batch_size'], df, testLoader, start_epoch)
+    training(config['num_epochs'], trainDataFrame, optimizer, model, criterion, config['seq_dim'], config['input_dim'], config['batch_size'], df, testLoader, start_epoch)
 
     evaluate(testLoader, model, config['seq_dim'], config['input_dim'], len(ActivityIdList),
              batch_size=config['batch_size'])
@@ -168,7 +168,7 @@ def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, 
             # generate train sequence list based upon above dataframe.
             time_to_start_from = randomDaySelected[j]
             minutes_to_run = minutesToRunFor[j]
-            trainData = create_inout_sequences(trainDataFrame[time_to_start_from : time_to_start_from + minutes_to_run], config['seq_dim'])
+            trainData = create_inout_sequences(trainDataFrame[time_to_start_from : time_to_start_from + minutes_to_run],config['seq_dim'])
 
             target = [trainData[x][1] for x in range(len(trainData))]
             class_sample_count = []
@@ -186,11 +186,11 @@ def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, 
             # Make Train DataLoader
             trainDataset = datasetCSV(trainData, config['seq_dim'])
             trainLoader = DataLoader(trainDataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'],
-                                     drop_last=True, sampler= sampler)
+                                     drop_last=True)
 
-
+            hn, cn = model.init_hidden(batch_size)
             for i, (input, label) in enumerate(trainLoader):
-                hn, cn = model.init_hidden(batch_size)
+
                 hn.detach_()
                 cn.detach_()
                 input = input.view(-1, seq_dim, input_dim)
@@ -248,14 +248,13 @@ def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, 
             writer.add_histogram(key, model.fc.state_dict()[key].data.cpu().numpy(), epoch + 1)
 
 # Evaluate the network
-def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size, testDataframe):
+def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
     # Initialize the prediction and label lists(tensors)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     nb_classes = config['output_dim']
 
-
-    confusion_matrix = torch.zeros(len(nb_classes), len(nb_classes))
+    confusion_matrix = torch.zeros(nb_classes, nb_classes)
 
     correct = 0
     total = 0
@@ -263,9 +262,8 @@ def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size, test
 
 
     with torch.no_grad():
+        hn, cn = model.init_hidden(batch_size)
         for input, labels in testLoader:
-
-            hn, cn = model.init_hidden(batch_size)
             input = input.view(-1, seq_dim, input_dim)
             # Load images to a Torch Variable
             if torch.cuda.is_available():
@@ -283,25 +281,25 @@ def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size, test
             total += labels.size(0)
             # Total correct predictions
             if torch.cuda.is_available():
-                print(predicted.cpu(), labels.cpu())
+                # print(predicted.cpu(), labels.cpu())
                 correct += (predicted.cpu() == labels.cpu()).sum()
             else:
-                print(predicted, labels)
+                # print(predicted, labels)
                 correct += (predicted == labels).sum()
             for t, p in zip(labels.view(-1), predicted.view(-1)):
                 confusion_matrix[t.long(), p.long()] += 1
     print('per class accuracy')
     per_class_acc = confusion_matrix.diag() / confusion_matrix.sum(1)
     per_class_acc = per_class_acc.cpu().numpy()
-    # per_class_acc[np.isnan(per_class_acc)] = 0
-
+    per_class_acc[np.isnan(per_class_acc)] = 0
+    print(per_class_acc)
     pd.isnull(np.array([np.nan, 0], dtype=float))
 
-    df_cm = pd.DataFrame(confusion_matrix, index=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])],
-                         columns=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])], dtype=float)
-    plt.figure(figsize=(20, 20))
-    sn.heatmap(df_cm, annot=True)
-    plt.show()
+    # df_cm = pd.DataFrame(confusion_matrix, index=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])],
+    #                      columns=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])], dtype=float)
+    # plt.figure(figsize=(20, 20))
+    # sn.heatmap(df_cm, annot=True)
+    # plt.show()
 
     accuracy = 100 * correct / total
 

@@ -2,7 +2,7 @@
 
 config = {
 "learning_rate" : 5e-3,
-"num_epochs" : 100,
+"num_epochs" : 50,
 "decay" : 1e-6,
 "input_dim" : 23,
 "hidden_dim" : 100,
