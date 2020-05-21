@@ -1,5 +1,6 @@
 *.h5   
 AnnotatedImage/
 h5py/
+data/
 logs/
 __pycache__/

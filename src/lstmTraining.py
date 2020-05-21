@@ -94,9 +94,8 @@ def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     if is_best:
         shutil.copyfile(filename, saved_model_path)
 
-def train(file_name, ActivityIdList):
+def train(csv_file, ActivityIdList):
 
-    csv_file = file_name + '.csv'
     df = pd.read_csv(csv_file)
 
     # Get class Frequency as a dictionary
@@ -152,6 +151,8 @@ def train(file_name, ActivityIdList):
     testData = create_inout_sequences(testDataFrame, config['seq_dim'])
     testLoader = DataLoader(testData, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'],
                             drop_last=True)
+
+
     training(config['num_epochs'], trainDataFrame, optimizer, model, criterion, config['seq_dim'], config['input_dim'], config['batch_size'], df, testLoader, start_epoch)
 
     evaluate(testLoader, model, config['seq_dim'], config['input_dim'], len(ActivityIdList),
@@ -181,10 +182,16 @@ def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, 
                 # generate train sequence list based upon above dataframe.
                 time_to_start_from = randomSelectedSubsets[-1]
                 minutes_to_run = minutesToRunFor[-1]
+
+
+            sorted_index = sorted(randomSelectedSubsets)
+
+            for index,(time_to_start_from) in enumerate(sorted_index):
+
                 results = \
-                create_inout_sequences(trainDataFrame[time_to_start_from: time_to_start_from + minutes_to_run],
+                create_inout_sequences(trainDataFrame[time_to_start_from: time_to_start_from + minutesToRunFor[i]],
                                        config['seq_dim'])
-                trainData.append(results[0])
+                trainData.extend(results)
 
             # Make Train DataLoader
             trainDataset = datasetCSV(trainData, config['seq_dim'])
@@ -312,10 +319,14 @@ def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
 
 if __name__ == "__main__":
     if sys.argv[1] != None:
+        file_name = sys.argv[1].split('.json')[0]
+        input_dir = os.path.join(os.getcwd(), '../', 'data', file_name)
+        csv_file_path = os.path.join(input_dir, file_name + '.csv')
+        json_file_path = os.path.join(input_dir, file_name + '.json')
+        csv_length = pd.read_csv(csv_file_path).shape[0]
         ActivityIdList = config['ActivityIdList']
-        file_name = '../houseB'
         # file_name = sys.argv[1].split('.')[0]
-        train(file_name, ActivityIdList)
+        train(csv_file_path, ActivityIdList)
 
 
 

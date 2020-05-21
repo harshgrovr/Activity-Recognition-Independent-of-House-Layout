@@ -9,12 +9,12 @@ class CNNModel(nn.Module):
         super(CNNModel, self).__init__()
         vgg16 = models.vgg16_bn(pretrained=False)
         layers = list(vgg16.features.children())[:-1]
-        layers[0] = nn.Conv2d(22, 64, kernel_size=3, stride=1, padding=1)
+        layers[0] = nn.Conv2d(28, 64, kernel_size=3, stride=1, padding=1)
         self.features = nn.Sequential(*layers)
 
         # Classifier
         self.classifier = nn.Sequential(
-            nn.Linear(512 * 46 * 56, 128),
+            nn.Linear(512 * 14 * 14, 128),
             nn.ReLU(),
             nn.Linear(128, 18),
             nn.ReLU(),
@@ -23,7 +23,7 @@ class CNNModel(nn.Module):
 
     def forward(self, x):
         x = self.features(x)
-        x = x.reshape(-1,  512 * 46 * 56)
+        x = x.reshape(-1,  512 * 14 * 14)
         out = self.classifier(x)
 
         return out
@@ -115,18 +115,18 @@ class Net(nn.Module):
 
         self.cnn_layers = nn.Sequential(
             # Defining a 2D convolution layer
-            nn.Conv2d(1, 4, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(4),
+            nn.Conv2d(28, 64, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
             # Defining another 2D convolution layer
-            nn.Conv2d(4, 4, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(4),
+            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
         )
 
         self.linear_layers = nn.Sequential(
-            nn.Linear(16 * 220, 18),
+            nn.Linear(1605632, 18),
             nn.Softmax(dim=1)
         )
 

@@ -15,6 +15,10 @@ config = {
 "accumulation_steps": 32,
 "no_of_subset":30 ,
 "subset_overlap_length": 2 ,
+"resize_width": 224 ,
+"resize_height": 224 ,
+"image_width": 908 ,
+"image_height": 740 ,
 "ActivityIdList" :  [
 
             {"name": "idle", "id": 0},

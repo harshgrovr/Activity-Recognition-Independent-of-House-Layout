@@ -10,6 +10,8 @@ import os
 from itertools import islice
 import glob
 
+from src.makeHDF5 import *
+from config.config import config
 
 def JSON_to_CSV(file):
     with open(file) as f:
@@ -244,16 +246,16 @@ def sensorLocation(jsonFile, activatedSensorNames):
                 d['angle'] = sensorLocationDict['angle']
                 sensorLocationList.append(d)
     return sensorLocationList
-def annotateImage(filename, input_dir, output_dir, minutesToGenrate = 100):
-    jsonFile= os.path.join(input_dir, file_name+'.json')
 
+def annotateImage(filename, input_dir, minutesToGenrate = 100):
+    jsonFile= os.path.join(input_dir, file_name+'.json')
 
     with open(jsonFile) as f:
         jsonFile = json.load(f)
     csv_name = os.path.join(input_dir, file_name+'.csv')
     df = pd.read_csv(csv_name)
 
-    annoatedImageDir = os.path.join(output_dir, 'AnnotatedImage')
+    annoatedImageDir = os.path.join(input_dir, 'AnnotatedImage')
     if not os.path.exists(annoatedImageDir):
         os.makedirs(annoatedImageDir)
 
@@ -275,9 +277,9 @@ def annotateImage(filename, input_dir, output_dir, minutesToGenrate = 100):
                     box = cv2.boxPoints(((center_x, center_y), (width_x, width_y), angle))
                     box = np.int0(box)
                     temp_image = image
-                    cv2.drawContours(temp_image, [box], 0, (0, 255, 255), 2)
+                    cv2.drawContours(temp_image, [box], 0, (0, 255, 255), -6)
                     # cv2.rectangle(image, (location[0], location[1]), (location[2], location[3]), (0, 255, 255), -1)
-                    temp_image = cv2.resize(temp_image, (224,224))
+                    temp_image = cv2.resize(temp_image, (config['resize_width'],config['resize_height']), interpolation=cv2.INTER_AREA)
 
                     cv2.imwrite(os.path.join(annoatedImageDir, row['start']+'.png'), temp_image)
         if index == minutesToGenrate:
@@ -312,7 +314,7 @@ def generateSensorLocationTemplateBasedUponJSON(file):
     print(json.dumps(d))
 
 
-def generateImagewithAllAnnoations(input_dir, output_dir, file_name):
+def generateImagewithAllAnnoations(input_dir, file_name):
     font = cv2.FONT_HERSHEY_SIMPLEX
     image = cv2.imread(os.path.join(input_dir, file_name+'.png'))
     with open(os.path.join(input_dir, file_name+'.json')) as f:
@@ -337,7 +339,7 @@ def generateImagewithAllAnnoations(input_dir, output_dir, file_name):
             else:
                 name = dict['name']
             cv2.putText(image, name, (int(center_x), int(center_y)), font, 0.4, (255, 0, 0), 1)
-            cv2.imwrite(os.path.join(output_dir, 'AnnoattedImage.png'), image)
+            cv2.imwrite(os.path.join(input_dir, 'AnnoattedImage.png'), image)
 
 
 def sortDictionary(file, key):
@@ -359,13 +361,13 @@ def create_blank(width, height, rgb_color=(255, 255, 255)):
     return image
 
 
-def generateBaseImage(file, imagePath= '', width1 = 0, height1 = 0):
+def generateBaseImage(input_dir, file_name, width1 = 0, height1 = 0):
     font = cv2.FONT_HERSHEY_SIMPLEX
     # Create new blank image
     white = (255, 255, 255)
     image = create_blank(width1, height1, white)
 
-    with open(file) as f:
+    with open(os.path.join(input_dir, file_name+'.json')) as f:
         jsonFile = json.load(f)
     for dict in jsonFile['baseImage']:
         location = dict['location']
@@ -391,9 +393,9 @@ def generateBaseImage(file, imagePath= '', width1 = 0, height1 = 0):
                 # else:
                 #     name = dict['name']
                 # cv2.putText(image, name, (int(center_x), int(center_y)), font, 0.4, (255, 0, 0), 1)
-    cv2.imwrite(os.path.join(os.getcwd(), 'houseB.png'), image)
+    cv2.imwrite(os.path.join(input_dir, 'houseB.png'), image)
 
-def generateObjectChannels(jsonFile, width = 908, height = 740,channel = 1):
+def generateObjectChannels(jsonFile, width = config['image_width'], height = config['image_height'],channel = 1):
     # Generate Objects Channel. A single channel for each unique object
     outputChannel = []
     objectChannelDict = {}
@@ -408,13 +410,23 @@ def generateObjectChannels(jsonFile, width = 908, height = 740,channel = 1):
         else:
             objectChannel[y1:y2, x1:x2, :] = 1
             objectChannelDict[object['name']] = objectChannel
+
+
     for k in objectChannelDict:
+
+        objectChannelDict[k] =  objectChannelDict[k].astype('uint8')
+        objectChannelDict[k] = cv2.resize(objectChannelDict[k], (config['resize_width'], config['resize_height']), interpolation=cv2.INTER_AREA)
+        objectChannelDict[k] = objectChannelDict[k].reshape((config['resize_width'], config['resize_height'], 1))
+
         outputChannel.append(objectChannelDict[k])
+
     outputChannel = np.concatenate(outputChannel, axis=2)
+
+
     return outputChannel
 
 
-def generateObjectChannelsImage(jsonFile, width = 908, height = 740,channel = 1):
+def generateObjectChannelsImage(jsonFile, width = config['image_width'], height = config['image_height'],channel = 1):
     # Generate Objects Channel. A single channel for each unique object
     outputChannel = []
     objectChannelDict = {}
@@ -429,9 +441,10 @@ def generateObjectChannelsImage(jsonFile, width = 908, height = 740,channel = 1)
         else:
             objectChannel[y1:y2, x1:x2, :] = 1
             cv2.imwrite("color_img.jpg", objectChannel * 255)
+    objectChannel = cv2.resize(objectChannel, (config['resize_width'],config['resize_height']), interpolation=cv2.INTER_AREA)
     cv2.imwrite("color_img.jpg", objectChannel * 255)
 
-def generateSensorChannelForTheMinute(jsonFile, minute='24-Jul-2009 16:46:00', csvFile = '', width = 908, height = 740, channel = 1):
+def generateSensorChannelForTheMinute(jsonFile, minute='24-Jul-2009 16:46:00', csvFile = '', width = config['image_width'], height = config['image_height'], channel = 1):
     # Generate Objects Channel. A single channel for each unique object
     df = csvFile[csvFile['start'] == minute]
     activatedSensorNames = df.columns[df.iloc[0, :] == 1]
@@ -440,14 +453,20 @@ def generateSensorChannelForTheMinute(jsonFile, minute='24-Jul-2009 16:46:00', c
     for dicts in rectangleDict:
         x1,y1,x2,y2 = dicts['location']
         sensorChannel[y1:y2, x1:x2, :] = 1
+    sensorChannel = sensorChannel.astype('uint8')
+    sensorChannel = cv2.resize(sensorChannel, (config['resize_width'], config['resize_height']), interpolation=cv2.INTER_AREA)
+    sensorChannel = sensorChannel.reshape((config['resize_width'], config['resize_height'], 1))
+
     return sensorChannel
 
 
 if __name__ == "__main__":
     if sys.argv[1] != None:
         file_name = sys.argv[1].split('.json')[0]
-        input_dir = os.path.join(os.getcwd(), '../input_data')
-        output_dir = os.path.join(os.getcwd(), '../output_data')
+        input_dir = os.path.join(os.getcwd(), '../' , 'data',  file_name)
+        csv_file_path = os.path.join(input_dir, file_name + '.csv')
+        json_file_path = os.path.join(input_dir, file_name + '.json')
+        csv_length = pd.read_csv(csv_file_path).shape[0]
         # sort the two Sensor and Activity data of JSON and replace the old JSON file
         # sortDictionary(sys.argv[1], 'sensorData')
         # sortDictionary(sys.argv[1], 'activityData')
@@ -456,18 +475,22 @@ if __name__ == "__main__":
         # JSON_to_CSV(sys.argv[1])
 
         # # Generate Dictionary Template for Annotations
-        # generateBaseImage(sys.argv[1], file_name + '.png', width1=908, height1= 740)
+        # generateBaseImage(input_dir, file_name, width1=908, height1= 740)
 
         # # Generate an Image named Annoation.png , showing all the sensors and objects
-        generateImagewithAllAnnoations(input_dir,output_dir, file_name)
+        # generateImagewithAllAnnoations(input_dir, file_name)
 
 
         # # Make a folder and save all the annotated Image per minute bases
-        # annotateImage(file_name,input_dir, output_dir, minutesToGenrate = 108)
+        annotateImage(file_name,input_dir, minutesToGenrate = 2000)
 
         # # Generate a video on above generated Image
-        # makeVideo(os.path.join(output_dir, 'AnnotatedImage'), fps=10)
+        # makeVideo(os.path.join(input_dir, 'AnnotatedImage'), fps=10)
 
+        # Generate H5 file for the images per day basic
+        dataset = Sensor(csv_file_path,json_file_path , root_dir=input_dir,
+                         transform=None)
+        dataset.generateOffline()
 
 
 
