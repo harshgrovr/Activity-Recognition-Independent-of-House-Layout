@@ -42,6 +42,18 @@ def getUniqueStartIndex(df):
     s = df['start']
     return s[s.diff().dt.days != 0].index.values
 
+# Give all index of new activity starting
+def getActivitiesStartIndex(df):
+    s = df['activity']
+    activityStartIndexes = np.array(s[s.ne(s.shift(-1)) == True].index.values)
+    activityStartIndexes = np.insert(activityStartIndexes, 0, 4, axis= 0)
+    activityStartDict = {}
+    for index in activityStartIndexes[:-1]:
+        activityName = s[index+1]
+        activityStartDict.setdefault(activityName, []).append(index + 1)
+    return activityStartDict
+
+
 def getIDFromClassName(train_label):
     ActivityIdList = config['ActivityIdList']
     train_label = [x for x in ActivityIdList if x["name"] == train_label]
@@ -140,48 +152,39 @@ def train(file_name, ActivityIdList):
     testData = create_inout_sequences(testDataFrame, config['seq_dim'])
     testLoader = DataLoader(testData, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'],
                             drop_last=True)
-
     training(config['num_epochs'], trainDataFrame, optimizer, model, criterion, config['seq_dim'], config['input_dim'], config['batch_size'], df, testLoader, start_epoch)
 
     evaluate(testLoader, model, config['seq_dim'], config['input_dim'], len(ActivityIdList),
              batch_size=config['batch_size'])
 
-
 # Train the Network
 def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, input_dim, batch_size, df, testLoader, start_epoch):
-    minutesToRunFor = []
-    randomDaySelected = []
 
     # for each random run select the random point and minute to run for
     # do this for each random point
-    for number in getUniqueStartIndex(trainDataFrame):
-        start, end = getStartAndEndIndex(trainDataFrame, number)
-        number = random.sample(range(start, end - config['seq_dim']), 1)[0]
-        randomDaySelected.append(number)
-        minutesToRunFor.append(end - number)
+
     writer = SummaryWriter('../logs')
 
     for epoch in range(num_epochs):
-        running_loss = 0
         print('epoch', epoch + start_epoch)
-        for j in range(len(randomDaySelected)):
-            # generate train sequence list based upon above dataframe.
-            time_to_start_from = randomDaySelected[j]
-            minutes_to_run = minutesToRunFor[j]
-            trainData = create_inout_sequences(trainDataFrame[time_to_start_from : time_to_start_from + minutes_to_run],config['seq_dim'])
-
-            target = [trainData[x][1] for x in range(len(trainData))]
-            class_sample_count = []
-            for t in np.unique(target):
-                class_sample_count.append([t, len(np.where(target == t)[0])])
-
-            weights = np.zeros(np.max(target) + 1)
-            for val in class_sample_count:
-                weights[val[0]] = 1/val[1]
-
-            samples_weights = np.array([weights[t] for t in target])
-
-            sampler = WeightedRandomSampler(weights=samples_weights,num_samples=len(samples_weights))
+        running_loss = 0
+        # Get Start Index(Subset) for each of the activity and the minutes to run for
+        activitiesStartDict = getActivitiesStartIndex(trainDataFrame)
+        for index in range(config['no_of_subset']):
+            trainData = []
+            randomSelectedSubsets = []
+            minutesToRunFor = []
+            for i, key in enumerate(activitiesStartDict.keys()):
+                activityIndexList = activitiesStartDict[key]
+                randomSelectedSubsets.append(random.choice(activityIndexList) - config['subset_overlap_length'])
+                minutesToRunFor.append(random.choice(range(20, 30)))
+                # generate train sequence list based upon above dataframe.
+                time_to_start_from = randomSelectedSubsets[-1]
+                minutes_to_run = minutesToRunFor[-1]
+                results = \
+                create_inout_sequences(trainDataFrame[time_to_start_from: time_to_start_from + minutes_to_run],
+                                       config['seq_dim'])
+                trainData.append(results[0])
 
             # Make Train DataLoader
             trainDataset = datasetCSV(trainData, config['seq_dim'])
@@ -281,7 +284,7 @@ def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
             total += labels.size(0)
             # Total correct predictions
             if torch.cuda.is_available():
-                # print(predicted.cpu(), labels.cpu())
+                print(predicted.cpu(), labels.cpu())
                 correct += (predicted.cpu() == labels.cpu()).sum()
             else:
                 # print(predicted, labels)
@@ -313,7 +316,6 @@ if __name__ == "__main__":
         file_name = '../houseB'
         # file_name = sys.argv[1].split('.')[0]
         train(file_name, ActivityIdList)
-
 
 
 

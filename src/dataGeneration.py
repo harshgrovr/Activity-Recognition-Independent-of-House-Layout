@@ -244,24 +244,23 @@ def sensorLocation(jsonFile, activatedSensorNames):
                 d['angle'] = sensorLocationDict['angle']
                 sensorLocationList.append(d)
     return sensorLocationList
+def annotateImage(filename, input_dir, output_dir, minutesToGenrate = 100):
+    jsonFile= os.path.join(input_dir, file_name+'.json')
 
-def annotateImage(file, imagePath= '', minutesToGenrate = 100):
-    with open(file) as f:
+
+    with open(jsonFile) as f:
         jsonFile = json.load(f)
-    file = file.split('.')[0]
-    csv_name = file+ '.csv'
+    csv_name = os.path.join(input_dir, file_name+'.csv')
     df = pd.read_csv(csv_name)
-    annoatedImageDir =''
 
-    if not os.path.exists(os.path.join(os.getcwd(), 'AnnotatedImage')):
-        os.makedirs(os.path.join(os.getcwd(), 'AnnotatedImage'))
-        annoatedImageDir = os.path.join(os.getcwd(), 'AnnotatedImage')
-    else:
-        annoatedImageDir = os.path.join(os.getcwd(), 'AnnotatedImage')
-        print('total files to generate: ', minutesToGenrate)
+    annoatedImageDir = os.path.join(output_dir, 'AnnotatedImage')
+    if not os.path.exists(annoatedImageDir):
+        os.makedirs(annoatedImageDir)
+
+    print('total files to generate: ', minutesToGenrate)
     for index, row in df.iterrows():
         print('generating image file:',index)
-        image = cv2.imread(imagePath)
+        image = cv2.imread(os.path.join(input_dir, filename+'.png'))
         activatedSensorNames = df.columns[df.iloc[index, :] == 1]
         rectangleDict = sensorLocation(jsonFile, activatedSensorNames)
         if rectangleDict != None:
@@ -275,9 +274,12 @@ def annotateImage(file, imagePath= '', minutesToGenrate = 100):
                     angle = dict['angle']
                     box = cv2.boxPoints(((center_x, center_y), (width_x, width_y), angle))
                     box = np.int0(box)
-                    cv2.drawContours(image, [box], 0, (0, 255, 255), 2)
+                    temp_image = image
+                    cv2.drawContours(temp_image, [box], 0, (0, 255, 255), 2)
                     # cv2.rectangle(image, (location[0], location[1]), (location[2], location[3]), (0, 255, 255), -1)
-                    cv2.imwrite(os.path.join(annoatedImageDir, row['start']+'.png'), image)
+                    temp_image = cv2.resize(temp_image, (224,224))
+
+                    cv2.imwrite(os.path.join(annoatedImageDir, row['start']+'.png'), temp_image)
         if index == minutesToGenrate:
             break
 
@@ -310,10 +312,10 @@ def generateSensorLocationTemplateBasedUponJSON(file):
     print(json.dumps(d))
 
 
-def generateImagewithAllAnnoations(file, imagePath= ''):
+def generateImagewithAllAnnoations(input_dir, output_dir, file_name):
     font = cv2.FONT_HERSHEY_SIMPLEX
-    image = cv2.imread(imagePath)
-    with open(file) as f:
+    image = cv2.imread(os.path.join(input_dir, file_name+'.png'))
+    with open(os.path.join(input_dir, file_name+'.json')) as f:
         jsonFile = json.load(f)
     for dict in jsonFile['sensorLocation']:
         location = dict['location']
@@ -335,7 +337,7 @@ def generateImagewithAllAnnoations(file, imagePath= ''):
             else:
                 name = dict['name']
             cv2.putText(image, name, (int(center_x), int(center_y)), font, 0.4, (255, 0, 0), 1)
-            cv2.imwrite(os.path.join(os.getcwd(), 'AnnoattedImage.png'), image)
+            cv2.imwrite(os.path.join(output_dir, 'AnnoattedImage.png'), image)
 
 
 def sortDictionary(file, key):
@@ -443,11 +445,12 @@ def generateSensorChannelForTheMinute(jsonFile, minute='24-Jul-2009 16:46:00', c
 
 if __name__ == "__main__":
     if sys.argv[1] != None:
-        file_name = sys.argv[1].split('.')[0]
-
+        file_name = sys.argv[1].split('.json')[0]
+        input_dir = os.path.join(os.getcwd(), '../input_data')
+        output_dir = os.path.join(os.getcwd(), '../output_data')
         # sort the two Sensor and Activity data of JSON and replace the old JSON file
-        sortDictionary(sys.argv[1], 'sensorData')
-        sortDictionary(sys.argv[1], 'activityData')
+        # sortDictionary(sys.argv[1], 'sensorData')
+        # sortDictionary(sys.argv[1], 'activityData')
 
         # Convert JSON to CSV
         # JSON_to_CSV(sys.argv[1])
@@ -456,13 +459,14 @@ if __name__ == "__main__":
         # generateBaseImage(sys.argv[1], file_name + '.png', width1=908, height1= 740)
 
         # # Generate an Image named Annoation.png , showing all the sensors and objects
-        # generateImagewithAllAnnoations(sys.argv[1], file_name + '.png')
+        generateImagewithAllAnnoations(input_dir,output_dir, file_name)
+
 
         # # Make a folder and save all the annotated Image per minute bases
-        annotateImage(sys.argv[1], file_name + '.png', minutesToGenrate = 2000)
+        # annotateImage(file_name,input_dir, output_dir, minutesToGenrate = 108)
 
         # # Generate a video on above generated Image
-        # makeVideo(os.path.join(os.getcwd(), 'AnnotatedImage'), fps=10)
+        # makeVideo(os.path.join(output_dir, 'AnnotatedImage'), fps=10)
 
 
 
