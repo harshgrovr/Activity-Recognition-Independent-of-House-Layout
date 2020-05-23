@@ -88,8 +88,8 @@ def splitDatasetIntoTrainAndTest(df):
     testDataFrame = df[int(df.shape[0] * config['split_ratio']) : df.shape[0]]
     return trainDataFrame, testDataFrame
 
-def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
-    saved_model_path = os.path.join('../saved_model/model_best.pth.tar' )
+def save_checkpoint(state, is_best, filename='checkpoint_lstm.pth.tar'):
+    saved_model_path = os.path.join("../saved_model/lstm/model_best.pth.tar")
     torch.save(state, filename)
     if is_best:
         shutil.copyfile(filename, saved_model_path)
@@ -97,7 +97,6 @@ def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
 def train(csv_file, ActivityIdList):
 
     df = pd.read_csv(csv_file)
-
     # Get class Frequency as a dictionary
     classFrequencyDict = df['activity'].value_counts().to_dict()
     temp_dict ={}
@@ -113,7 +112,7 @@ def train(csv_file, ActivityIdList):
 
     # Sort it according to the class labels
     classFrequenciesList = np.array([value for key, value in sorted(temp_dict.items())])
-    classFrequenciesList = np.max(classFrequenciesList)/classFrequenciesList
+    classFrequenciesList = 1/classFrequenciesList
     classFrequenciesList[classFrequenciesList == np.inf] = 0
     if torch.cuda.is_available():
         class_weights = torch.tensor(classFrequenciesList).float().cuda()
@@ -125,16 +124,16 @@ def train(csv_file, ActivityIdList):
         model.cuda()
 
     print('cuda available: ', torch.cuda.is_available())
-
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     criterion = nn.CrossEntropyLoss(weight = class_weights)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config['learning_rate'], weight_decay=config['decay'])
 
-    path = "../saved_model/model_best.pth.tar"
+    path = "../saved_model/lstm/model_best.pth.tar"
     start_epoch = 0
     if os.path.isfile(path):
         print("=> loading checkpoint '{}'".format(path))
-        checkpoint = torch.load(path)
+        checkpoint = torch.load(path, map_location=torch.device("cpu"))
         model.load_state_dict(checkpoint['state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer'])
         start_epoch += checkpoint['epoch']
@@ -152,25 +151,24 @@ def train(csv_file, ActivityIdList):
     testLoader = DataLoader(testData, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'],
                             drop_last=True)
 
+    training(config['num_epochs'], trainDataFrame, optimizer, model, criterion, config['seq_dim'], config['input_dim'], config['batch_size'], df, testLoader, start_epoch, file_name)
 
-    training(config['num_epochs'], trainDataFrame, optimizer, model, criterion, config['seq_dim'], config['input_dim'], config['batch_size'], df, testLoader, start_epoch)
-
-    evaluate(testLoader, model, config['seq_dim'], config['input_dim'], len(ActivityIdList),
+    evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
              batch_size=config['batch_size'])
 
 # Train the Network
-def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, input_dim, batch_size, df, testLoader, start_epoch):
+def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, input_dim, batch_size, df, testLoader, start_epoch, file_name):
 
     # for each random run select the random point and minute to run for
     # do this for each random point
 
-    writer = SummaryWriter('../logs')
-
+    writer = SummaryWriter(os.path.join('../logs', file_name, 'lstm'))
+    # Get Start Index(Subset) for each of the activity
+    activitiesStartDict = getActivitiesStartIndex(trainDataFrame)
+    running_loss = 0
     for epoch in range(num_epochs):
         print('epoch', epoch + start_epoch)
-        running_loss = 0
         # Get Start Index(Subset) for each of the activity and the minutes to run for
-        activitiesStartDict = getActivitiesStartIndex(trainDataFrame)
         for index in range(config['no_of_subset']):
             trainData = []
             randomSelectedSubsets = []
@@ -179,10 +177,6 @@ def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, 
                 activityIndexList = activitiesStartDict[key]
                 randomSelectedSubsets.append(random.choice(activityIndexList) - config['subset_overlap_length'])
                 minutesToRunFor.append(random.choice(range(20, 30)))
-                # generate train sequence list based upon above dataframe.
-                time_to_start_from = randomSelectedSubsets[-1]
-                minutes_to_run = minutesToRunFor[-1]
-
 
             sorted_index = sorted(randomSelectedSubsets)
 
@@ -200,7 +194,6 @@ def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, 
 
             hn, cn = model.init_hidden(batch_size)
             for i, (input, label) in enumerate(trainLoader):
-
                 hn.detach_()
                 cn.detach_()
                 input = input.view(-1, seq_dim, input_dim)
@@ -218,14 +211,13 @@ def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, 
                 # Calculate Loss: softmax --> cross entropy loss
                 loss = criterion(output, label)#weig pram
                 running_loss += loss
-                loss = loss / config["accumulation_steps"]  # Normalize our loss (if averaged)
                 loss.backward()  # Backward pass
-                if (i) % config["accumulation_steps"] -1 == 0:  # Wait for several backward steps
-                    optimizer.step()  # Now we can do an optimizer step
-                    model.zero_grad()  # Reset gradients tensors
+                # if (i) % config["accumulation_steps"] -1 == 0:  # Wait for several backward steps
+                optimizer.step()  # Now we can do an optimizer step
+                optimizer.zero_grad()  # Reset gradients tensors
 
         if epoch % 10 == 0:
-            accuracy, per_class_accuracy = evaluate(testLoader, model, config['seq_dim'], config['input_dim'], len(ActivityIdList),
+            accuracy, per_class_accuracy = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
                  batch_size=config['batch_size'])
 
             # Logging mean class accuracy
@@ -241,39 +233,37 @@ def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, 
                 'optimizer': optimizer.state_dict(),
             }, True)
 
-        # Logging Gradients
-        for tag, value in model.named_parameters():
-            tag = tag.replace('.', '/')
-            writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + 1)
+            for tag, value in model.named_parameters():
+                tag = tag.replace('.', '/')
+                print(value.grad.data.cpu().numpy())
+                writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + 1)
+
+            # plot weights historgram
+            for key in model.lstm.state_dict():
+                writer.add_histogram(key, model.lstm.state_dict()[key].data.cpu().numpy(), epoch + 1)
+            for key in model.fc.state_dict():
+                writer.add_histogram(key, model.fc.state_dict()[key].data.cpu().numpy(), epoch + 1)
 
         # Loggin loss
         writer.add_scalar('Loss', running_loss, epoch + 1)
         print('%d loss: %.3f' %
               (epoch + 1,  running_loss))
+        running_loss = 0
 
-      # plot weights historgram
-        for key in model.lstm.state_dict():
-            writer.add_histogram(key, model.lstm.state_dict()[key].data.cpu().numpy(), epoch + 1)
-        for key in model.fc.state_dict():
-            writer.add_histogram(key, model.fc.state_dict()[key].data.cpu().numpy(), epoch + 1)
 
 # Evaluate the network
-def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
+def evaluate(testLoader, model, seq_dim, input_dim, batch_size):
     # Initialize the prediction and label lists(tensors)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     nb_classes = config['output_dim']
-
     confusion_matrix = torch.zeros(nb_classes, nb_classes)
-
     correct = 0
     total = 0
     # Iterate through test dataset
-
-
     with torch.no_grad():
-        hn, cn = model.init_hidden(batch_size)
         for input, labels in testLoader:
+            hn, cn = model.init_hidden(batch_size)
             input = input.view(-1, seq_dim, input_dim)
             # Load images to a Torch Variable
             if torch.cuda.is_available():
@@ -294,19 +284,25 @@ def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
                 print(predicted.cpu(), labels.cpu())
                 correct += (predicted.cpu() == labels.cpu()).sum()
             else:
-                # print(predicted, labels)
+                print(predicted, labels)
                 correct += (predicted == labels).sum()
             for t, p in zip(labels.view(-1), predicted.view(-1)):
                 confusion_matrix[t.long(), p.long()] += 1
     print('per class accuracy')
     per_class_acc = confusion_matrix.diag() / confusion_matrix.sum(1)
     per_class_acc = per_class_acc.cpu().numpy()
-    per_class_acc[np.isnan(per_class_acc)] = 0
-    print(per_class_acc)
-    pd.isnull(np.array([np.nan, 0], dtype=float))
+    per_class_acc[np.isnan(per_class_acc)] = -1
+    print(confusion_matrix.diag())
+    print(confusion_matrix.sum(1))
+    d ={}
+    for i, entry in enumerate(per_class_acc):
+        if entry != -1:
+            d[getClassnameFromID(i)] = entry
+    print(d)
+    pd.isnull(np.array([np.nan, -1], dtype=float))
 
-    # df_cm = pd.DataFrame(confusion_matrix, index=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])],
-    #                      columns=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])], dtype=float)
+    df_cm = pd.DataFrame(confusion_matrix, index=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])],
+                         columns=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])], dtype=float)
     # plt.figure(figsize=(20, 20))
     # sn.heatmap(df_cm, annot=True)
     # plt.show()
@@ -325,7 +321,6 @@ if __name__ == "__main__":
         json_file_path = os.path.join(input_dir, file_name + '.json')
         csv_length = pd.read_csv(csv_file_path).shape[0]
         ActivityIdList = config['ActivityIdList']
-        # file_name = sys.argv[1].split('.')[0]
         train(csv_file_path, ActivityIdList)
 
 

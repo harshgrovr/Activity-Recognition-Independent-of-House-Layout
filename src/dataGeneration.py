@@ -482,7 +482,7 @@ if __name__ == "__main__":
 
 
         # # Make a folder and save all the annotated Image per minute bases
-        annotateImage(file_name,input_dir, minutesToGenrate = 2000)
+        # annotateImage(file_name,input_dir, minutesToGenrate = 2000)
 
         # # Generate a video on above generated Image
         # makeVideo(os.path.join(input_dir, 'AnnotatedImage'), fps=10)

@@ -1,18 +1,18 @@
 #!/usr/bin/env python
 
 config = {
-"learning_rate" : 5e-3,
-"num_epochs" : 200,
+"learning_rate" : 1e-3,
+"num_epochs" : 50,
 "decay" : 1e-6,
 "input_dim" : 23,
 "hidden_dim" : 100,
-"layer_dim" : 3,
+"layer_dim" : 2,
 "output_dim" : 18,
-"seq_dim" : 10,
-"batch_size" : 4,
+"seq_dim" : 7,
+"batch_size" : 16,
 "split_ratio" : 2/3,
 "num_workers":8,
-"accumulation_steps": 32,
+"accumulation_steps": 2,
 "no_of_subset":30 ,
 "subset_overlap_length": 2 ,
 "resize_width": 224 ,
@@ -41,4 +41,3 @@ config = {
             {"name": "eatBreakfast", "id": 17}
         ]
 }
-

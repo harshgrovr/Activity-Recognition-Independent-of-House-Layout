@@ -80,7 +80,7 @@ class Sensor():
           self.image_name = os.path.join(self.root_dir, 'AnnotatedImage', self.csvFile.iloc[idx, 0])
           self.image = cv2.imread(self.image_name + '.png')
           self.sensorChannel = generateSensorChannelForTheMinute(self.jsonFile, self.csvFile.iloc[idx, 0], self.csvFile, self.width, self.height, self.channel)
-
+          self.image= self.image/255
           self.image = np.concatenate((self.image, self.sensorChannel), axis=2)
           self.image = np.expand_dims(self.image, axis= 0)
 
@@ -96,7 +96,6 @@ class Sensor():
           archive['images'].resize((archive["images"].shape[0] + zeros.shape[0]), axis=0)
 
         archive['images'][-zeros.shape[0]:] = self.image
-
 
         labels = np.append(labels, self.label)
         idx += 1
@@ -117,9 +116,9 @@ class Sensor():
       # Incrementing first date till it reaches to last date
       firstdate += timedelta(days=1)
 
-
-if __name__ == "__main__":
-    if sys.argv[1] != None:
-        fileName = sys.argv[1].split('.')[0]
-        dataset = Sensor(csv_file_path=fileName + '.csv', json_file_path=fileName + '.json', root_dir=os.getcwd(), transform=None)
-        dataset.generateOffline()
+#
+# if __name__ == "__main__":
+#     if sys.argv[1] != None:
+#         fileName = sys.argv[1].split('.')[0]
+#         dataset = Sensor(csv_file_path=fileName + '.csv', json_file_path=fileName + '.json', root_dir=os.getcwd(), transform=None)
+#         dataset.generateOffline()

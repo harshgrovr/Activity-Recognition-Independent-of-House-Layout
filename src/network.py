@@ -18,7 +18,6 @@ class CNNModel(nn.Module):
             nn.ReLU(),
             nn.Linear(128, 18),
             nn.ReLU(),
-            nn.Softmax(dim=1)
         )
 
     def forward(self, x):
@@ -40,7 +39,7 @@ class LSTMModel(nn.Module):
             hn = torch.zeros(self.layer_dim, self.batch_size, self.hidden_dim)
             # Initialize cell state
             cn = torch.zeros(self.layer_dim, self.batch_size, self.hidden_dim)
-        return Variable(hn), Variable(cn)
+        return hn, cn
 
     def __init__(self, input_dim, hidden_dim, layer_dim, output_dim, seq_dim):
         super(LSTMModel, self).__init__()
@@ -73,7 +72,6 @@ class LSTMModel(nn.Module):
 
         # Index hidden state of last time step
         out = self.fc(out[:, -1, :])
-        out = self.softmax(out)
         return out, (hn,cn)
 
 class HARmodel(nn.Module):
@@ -127,7 +125,6 @@ class Net(nn.Module):
 
         self.linear_layers = nn.Sequential(
             nn.Linear(1605632, 18),
-            nn.Softmax(dim=1)
         )
 
     # Defining the forward pass
