@@ -1,3 +1,4 @@
+import os
 import shutil
 
 import torch
@@ -14,7 +15,7 @@ from torch.utils.data.sampler import Sampler, WeightedRandomSampler
 
 from torch.utils.tensorboard import SummaryWriter
 
-from src.network import HARmodel, Net, CNNModel
+from src.network import HARmodel, Net, CNNModel,LSTMModel
 import numpy as np
 import seaborn as sn
 import pandas as pd
@@ -109,7 +110,7 @@ def train(file_name, ActivityIdList):
     else:
         class_weights = torch.tensor(classFrequenciesList).float()
 
-    model = HARmodel(config['output_dim'])
+    model = LSTMModel(config['input_dim'], config['hidden_dim'], config['layer_dim'],config['output_dim'], config['seq_dim'])
 
     if torch.cuda.is_available():
         model.cuda()
@@ -129,9 +130,12 @@ def train(file_name, ActivityIdList):
 
     training(config['num_epochs'], trainDataFrame, optimizer, model, criterion, config['seq_dim'], config['input_dim'], config['batch_size'], df, testLoader)
 
-    evaluate(testLoader, model, config['seq_dim'], config['input_dim'], len(ActivityIdList),
-             batch_size=config['batch_size'])
 
+def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+    saved_model_path = os.path.join('../saved_model/model_best.pth.tar')
+    torch.save(state, filename)
+    if is_best:
+        shutil.copyfile(filename, saved_model_path)
 
 # Train the Network
 def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, input_dim, batch_size, df, testLoader):
@@ -146,78 +150,48 @@ def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, 
         randomDaySelected.append(number)
         minutesToRunFor.append(end - number)
     writer = SummaryWriter('../logs')
+    trainData = create_inout_sequences(trainDataFrame, config['seq_dim'])
+    trainDataset = datasetCSV(trainData, config['seq_dim'])
+    trainLoader = DataLoader(trainDataset, batch_size=config['batch_size'], shuffle=False,
+                             num_workers=config['num_workers'],
+                             drop_last=True)
 
     for epoch in range(num_epochs):
         running_loss = 0
         print('epoch', epoch)
-        for j in range(len(randomDaySelected)):
-            # generate train sequence list based upon above dataframe.
-            time_to_start_from = randomDaySelected[j]
-            minutes_to_run = minutesToRunFor[j]
-            trainData = create_inout_sequences(trainDataFrame[time_to_start_from : time_to_start_from + minutes_to_run], config['seq_dim'])
+        for i, (input, label) in enumerate(trainLoader):
+            hn, cn = model.init_hidden(batch_size)
+            input = input.view(-1, seq_dim, input_dim)
+            if torch.cuda.is_available():
+                input = input.float().cuda()
+                label = label.cuda()
+            else:
+                input = input.float()
+                label = label
 
-            target = [trainData[x][1] for x in range(len(trainData))]
-            class_sample_count = []
-            for t in np.unique(target):
-                class_sample_count.append([t, len(np.where(target == t)[0])])
+            # Forward pass to get output/logits
+            output, (hn, cn) = model((input, (hn, cn)))
+            # Calculate Loss: softmax --> cross entropy loss
+            loss = criterion(output, label)#weig pram
+            running_loss += loss
+            loss = loss / config["accumulation_steps"]  # Normalize our loss (if averaged)
+            loss.backward()  # Backward pass
 
-            weights = np.zeros(np.max(target) + 1)
-            for val in class_sample_count:
-                weights[val[0]] = 1/val[1]
-
-            samples_weights = np.array([weights[t] for t in target])
-
-            sampler = WeightedRandomSampler(weights=samples_weights,num_samples=len(samples_weights))
-
-            # Make Train DataLoader
-            trainDataset = datasetCSV(trainData, config['seq_dim'])
-            trainLoader = DataLoader(trainDataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'],
-                                     drop_last=True)
-
-
-            for i, (input, label) in enumerate(trainLoader):
-                input = input.reshape(input.size(0), 1, 230)
-                if torch.cuda.is_available():
-                    input = input.float().cuda()
-                    label = label.cuda()
-                else:
-                    input = input.float()
-                    label = label
-
-                # Forward pass to get output/logits
-                output = model(input)
-                # Calculate Loss: softmax --> cross entropy loss
-                loss = criterion(output, label)#weig pram
-                running_loss += loss
-                loss = loss / config["accumulation_steps"]  # Normalize our loss (if averaged)
-                loss.backward()  # Backward pass
-
-
-
-                if (i) % config["accumulation_steps"] -1 == 0:  # Wait for several backward steps
-                    optimizer.step()  # Now we can do an optimizer step
-                    model.zero_grad()  # Reset gradients tensors
-
-        if epoch % 50 == 0:
+            optimizer.step()  # Now we can do an optimizer step
+            optimizer.zero_grad()  # Reset gradients tensors
+        print(running_loss)
+        running_loss = 0
+        if epoch % 10 == 0:
             accuracy, per_class_accuracy = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
                                                     len(ActivityIdList),
                                                     batch_size=config['batch_size'])
+            save_checkpoint({
+                'epoch': epoch + 1,
+                'state_dict': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+            }, True)
 
-        # Logging Gradients
-        for tag, value in model.named_parameters():
-            tag = tag.replace('.', '/')
-            writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + 1)
 
-        # Loggin loss
-        writer.add_scalar('Loss', running_loss, epoch + 1)
-        print('%d loss: %.3f' %
-              (epoch + 1,  running_loss))
-      #
-      # # plot weights historgram
-      #   for key in model.lstm.state_dict():
-      #       writer.add_histogram(key, model.lstm.state_dict()[key].data.cpu().numpy(), epoch + 1)
-      #   for key in model.fc.state_dict():
-      #       writer.add_histogram(key, model.fc.state_dict()[key].data.cpu().numpy(), epoch + 1)
 
 # Evaluate the network
 def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
@@ -233,8 +207,9 @@ def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
     # Iterate through test dataset
 
     with torch.no_grad():
+        hn, cn = model.init_hidden(batch_size)
         for input, labels in testLoader:
-            input = input.reshape(input.size(0), 1, 230)
+            input = input.view(-1, seq_dim, input_dim)
             # Load images to a Torch Variable
             if torch.cuda.is_available():
                 input = input.float().cuda()
@@ -243,7 +218,7 @@ def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
                 input = input.float()
 
             # Forward pass only to get logits/output
-            output= model(input)
+            output, (hn, cn) = model((input, (hn, cn)))
 
             # Get predictions from the maximum value
             _, predicted = torch.max(output, 1)
@@ -251,15 +226,15 @@ def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
             total += labels.size(0)
             # Total correct predictions
             if torch.cuda.is_available():
-                print(predicted.cpu(), labels.cpu())
+                # print(predicted.cpu(), labels.cpu())
                 correct += (predicted.cpu() == labels.cpu()).sum()
             else:
-                print(predicted, labels)
+                # print(predicted, labels)
                 correct += (predicted == labels).sum()
             for t, p in zip(labels.view(-1), predicted.view(-1)):
                 confusion_matrix[t.long(), p.long()] += 1
-    print('Confusion matrix')
-    print(confusion_matrix)
+    # print('Confusion matrix')
+    # print(confusion_matrix)
     print('per class accuracy')
     per_class_acc = confusion_matrix.diag() / confusion_matrix.sum(1)
     per_class_acc = per_class_acc.cpu().numpy()
@@ -269,11 +244,11 @@ def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
 
     pd.isnull(np.array([np.nan, 0], dtype=float))
 
-    df_cm = pd.DataFrame(confusion_matrix, index=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])],
-                         columns=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])], dtype=float)
-    plt.figure(figsize=(10, 7))
-    sn.heatmap(df_cm, annot=True)
-    plt.show()
+    # df_cm = pd.DataFrame(confusion_matrix, index=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])],
+    #                      columns=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])], dtype=float)
+    # plt.figure(figsize=(10, 7))
+    # sn.heatmap(df_cm, annot=True)
+    # plt.show()
 
     accuracy = 100 * correct / total
 
@@ -284,10 +259,6 @@ def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
 if __name__ == "__main__":
     if sys.argv[1] != None:
         ActivityIdList = config['ActivityIdList']
-        file_name = '../houseB'
+        file_name = '../ordonezB'
         # file_name = sys.argv[1].split('.')[0]
         train(file_name, ActivityIdList)
-
-
-
-
