@@ -208,6 +208,10 @@ def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, 
                 # Forward pass to get output/logits
                 output, (hn, cn) = model((input, (hn, cn)))
 
+                # l1_regularization = torch.tensor(0)
+                # for param in model.parameters():
+                #     l1_regularization += torch.norm(param, 1) ** 2
+                # loss = loss + config['decay'] * l1_regularization
                 # Calculate Loss: softmax --> cross entropy loss
                 loss = criterion(output, label)#weig pram
                 running_loss += loss

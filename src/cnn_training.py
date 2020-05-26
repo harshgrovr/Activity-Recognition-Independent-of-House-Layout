@@ -36,7 +36,7 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
     total_acc_for_LOOCV = 0
 
     # Defining Model, Optimizer and Loss
-    model = Net().to(device)
+    model = Net(config['output_dim']).to(device)
 
     print('cuda available: ', torch.cuda.is_available())
 
@@ -60,8 +60,8 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
     classFrequenciesList = 1 / classFrequenciesList
     classFrequenciesList[classFrequenciesList == np.inf] = 0
     class_weights = torch.tensor(classFrequenciesList).float().to(device)
-
-    criterion = nn.CrossEntropyLoss(weight = class_weights)
+    print(class_weights)
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config['learning_rate'], weight_decay=config['decay'])
 
@@ -103,16 +103,16 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
         file_index = test_index[-1]
         date = datetime.strptime(h5Files[file_index][0], '%d-%b-%Y')
         file_path = os.path.join(h5Directory, date.strftime('%d-%b-%Y') + '.h5')
-
+        trainLoader = ''
         dataset = datasetHDF5(objectsChannel, curr_file_path=file_path)
-        testLoader = DataLoader(dataset, batch_size=16, shuffle=False, num_workers=8)
+        testLoader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, num_workers=8)
 
         for file_index in train_index:
             date = datetime.strptime(h5Files[file_index][0], '%d-%b-%Y')
             file_path = os.path.join(h5Directory, date.strftime('%d-%b-%Y') + '.h5')
 
             dataset = datasetHDF5(objectsChannel, curr_file_path = file_path)
-            trainLoader = DataLoader(dataset, batch_size=16, shuffle=True, num_workers=8)
+            trainLoader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=True, num_workers=8)
 
             training(config['num_epochs'], trainLoader,  testLoader,optimizer, model, criterion, start_epoch)
 
@@ -120,6 +120,11 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
         break
 
     print("Avg. Accuracy is {}".format(total_acc_for_LOOCV))
+def image_from_tensor(image):
+    image = image[0].numpy()
+    print(image.shape)
+    cv2.imshow('img', image[:, :, 3])
+    cv2.waitKey(0)
 
 def training(num_epochs, trainLoader, testLoader, optimizer, model, criterion, start_epoch, accumulation_steps = config['accumulation_steps']):
     writer = SummaryWriter(os.path.join('../logs', file_name, 'cnn_lstm'))
@@ -136,7 +141,6 @@ def training(num_epochs, trainLoader, testLoader, optimizer, model, criterion, s
 
             # Forward pass to get output/logits
             output = model(image)
-
             # Calculate Loss: softmax --> cross entropy loss
             loss = criterion(output, label)
             running_loss += loss
@@ -168,9 +172,9 @@ def training(num_epochs, trainLoader, testLoader, optimizer, model, criterion, s
                 tag = tag.replace('.', '/')
                 writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + 1)
 
-            # plot weights historgram
-            for key in model.linear_layers.state_dict():
-                writer.add_histogram(key, model.linear_layers.state_dict()[key].data.cpu().numpy(), epoch + 1)
+            # # plot weights historgram
+            # for key in model.linear_layers.state_dict():
+            #     writer.add_histogram(key, model.linear_layers.state_dict()[key].data.cpu().numpy(), epoch + 1)
 
         # Loggin loss
         writer.add_scalar('Loss', running_loss, epoch + 1)

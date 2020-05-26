@@ -478,7 +478,7 @@ if __name__ == "__main__":
         # generateBaseImage(input_dir, file_name, width1=908, height1= 740)
 
         # # Generate an Image named Annoation.png , showing all the sensors and objects
-        # generateImagewithAllAnnoations(input_dir, file_name)
+        generateImagewithAllAnnoations(input_dir, file_name)
 
 
         # # Make a folder and save all the annotated Image per minute bases
