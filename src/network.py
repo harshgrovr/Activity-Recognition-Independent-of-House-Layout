@@ -3,7 +3,7 @@ import torchvision.models as models
 import torch.nn as nn
 from torch.autograd import Variable
 import numpy as np
-
+from Better_LSTM_PyTorch.better_lstm import LSTM
 class CNNModel(nn.Module):
     def __init__(self):
         super(CNNModel, self).__init__()

@@ -13,7 +13,7 @@ from torch.utils.data.sampler import Sampler, WeightedRandomSampler
 
 from torch.utils.tensorboard import SummaryWriter
 
-from src.network import LSTMModel
+from src.network import LSTM
 import numpy as np
 import seaborn as sn
 import pandas as pd
@@ -94,6 +94,23 @@ def save_checkpoint(state, is_best, filename='checkpoint_lstm.pth.tar'):
     if is_best:
         shutil.copyfile(filename, saved_model_path)
 
+def getWeightedSampler(trainData):
+    target = [trainData[x][1] for x in range(len(trainData))]
+    class_sample_count = []
+    for t in np.unique(target):
+        class_sample_count.append([t, len(np.where(target == t)[0])])
+
+    weights = np.zeros(np.max(target) + 1)
+    for val in class_sample_count:
+        weights[val[0]] = 1/val[1]
+
+    samples_weights = np.array([weights[t] for t in target])
+
+    sampler = WeightedRandomSampler(weights=samples_weights,num_samples=len(samples_weights))
+    return sampler
+
+
+
 def train(csv_file, ActivityIdList):
 
     df = pd.read_csv(csv_file)
@@ -119,13 +136,13 @@ def train(csv_file, ActivityIdList):
     else:
         class_weights = torch.tensor(classFrequenciesList).float()
 
-    model = LSTMModel(config['input_dim'], config['hidden_dim'], config['layer_dim'],config['output_dim'], config['seq_dim'])
+    model = LSTM(13, 32)
     if torch.cuda.is_available():
         model.cuda()
 
     print('cuda available: ', torch.cuda.is_available())
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    criterion = nn.CrossEntropyLoss(weight = class_weights)
+    criterion = nn.CrossEntropyLoss()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config['learning_rate'], weight_decay=config['decay'])
 
@@ -151,7 +168,7 @@ def train(csv_file, ActivityIdList):
     trainDataset = datasetCSV(trainDataseq, config['seq_dim'])
     trainLoader = DataLoader(trainDataset, batch_size=config['batch_size'], shuffle=False,
                              num_workers=config['num_workers'],
-                             drop_last=True)
+                             drop_last=True, sampler= getWeightedSampler(trainDataseq))
 
     # Generate Test DataLoader
     testDataseq = create_inout_sequences(testDataFrame, config['seq_dim'])
@@ -187,11 +204,8 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
         running_loss = 0
         print('epoch', epoch + start_epoch)
         # Get Start Index(Subset) for each of the activity and the minutes to run for
-        hn, cn = model.init_hidden(batch_size)
         for i, (input, label) in enumerate(trainLoader):
 
-            hn.detach_()
-            cn.detach_()
             input = input.view(-1, seq_dim, input_dim)
 
             if torch.cuda.is_available():
@@ -202,7 +216,7 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
                 label = label
 
             # Forward pass to get output/logits
-            output, (hn, cn) = model((input, (hn, cn)))
+            output, (hn,cn) = model((input))
 
             # l1_regularization = torch.tensor(0)
             # for param in model.parameters():
@@ -241,11 +255,11 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
                 # print(value.grad.data.cpu().numpy())
                 writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + start_epoch+ 1)
 
-            # plot weights historgram
-            for key in model.lstm.state_dict():
-                writer.add_histogram(key, model.lstm.state_dict()[key].data.cpu().numpy(), epoch + start_epoch+ 1)
-            for key in model.fc.state_dict():
-                writer.add_histogram(key, model.fc.state_dict()[key].data.cpu().numpy(), epoch + start_epoch+ 1)
+            # # plot weights historgram
+            # for key in model.lstm.state_dict():
+            #     writer.add_histogram(key, model.lstm.state_dict()[key].data.cpu().numpy(), epoch + start_epoch+ 1)
+            # for key in model.fc.state_dict():
+            #     writer.add_histogram(key, model.fc.state_dict()[key].data.cpu().numpy(), epoch + start_epoch+ 1)
 
 
 
@@ -266,7 +280,6 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
     # Iterate through test dataset
     with torch.no_grad():
 
-        hn, cn = model.init_hidden(batch_size)
         for input, labels in testLoader:
 
             input = input.view(-1, seq_dim, input_dim)
@@ -278,7 +291,7 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
                 input = input.float()
 
             # Forward pass only to get logits/output
-            output, (hn, cn) = model((input, (hn, cn)))
+            output, (hn, cn) = model(input)
 
             loss = criterion(output, labels)  # weig pram
 
