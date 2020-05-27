@@ -103,7 +103,6 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
         file_index = test_index[-1]
         date = datetime.strptime(h5Files[file_index][0], '%d-%b-%Y')
         file_path = os.path.join(h5Directory, date.strftime('%d-%b-%Y') + '.h5')
-        trainLoader = ''
         dataset = datasetHDF5(objectsChannel, curr_file_path=file_path)
         testLoader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, num_workers=8)
 
@@ -114,9 +113,9 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
             dataset = datasetHDF5(objectsChannel, curr_file_path = file_path)
             trainLoader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=True, num_workers=8)
 
-            training(config['num_epochs'], trainLoader,  testLoader,optimizer, model, criterion, start_epoch)
-
-        total_acc_for_LOOCV += evaluate(testLoader, model)
+            # training(config['num_epochs'], trainLoader,  trainLoader,optimizer, model, criterion, start_epoch)
+            print('testing it')
+            accuracy, per_class_accuracy = evaluate(trainLoader, model)
         break
 
     print("Avg. Accuracy is {}".format(total_acc_for_LOOCV))
@@ -216,7 +215,12 @@ def evaluate(testLoader, model):
     per_class_acc = confusion_matrix.diag() / confusion_matrix.sum(1)
     per_class_acc = per_class_acc.cpu().numpy()
     per_class_acc[np.isnan(per_class_acc)] = -1
-    print(per_class_acc)
+    d = {}
+    for i in range(len(per_class_acc)):
+        if per_class_acc[i] != -1:
+            d[getClassnameFromID(i)] = per_class_acc[i]
+
+    print(d)
     # pd.isnull(np.array([np.nan, -1], dtype=float))
 
     # df_cm = pd.DataFrame(confusion_matrix, index=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])],

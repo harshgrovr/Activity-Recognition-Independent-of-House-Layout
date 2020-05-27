@@ -31,13 +31,13 @@ class LSTMModel(nn.Module):
     def init_hidden(self, batch_size):
         self.batch_size = batch_size
         if torch.cuda.is_available():
-            hn = torch.zeros(self.layer_dim, self.batch_size, self.hidden_dim).cuda()
+            hn = torch.zeros(self.layer_dim * 2, self.batch_size, self.hidden_dim).cuda()
             # Initialize cell state
-            cn = torch.zeros(self.layer_dim, self.batch_size, self.hidden_dim).cuda()
+            cn = torch.zeros(self.layer_dim * 2, self.batch_size, self.hidden_dim).cuda()
         else:
-            hn = torch.zeros(self.layer_dim, self.batch_size, self.hidden_dim)
+            hn = torch.zeros(self.layer_dim * 2, self.batch_size, self.hidden_dim)
             # Initialize cell state
-            cn = torch.zeros(self.layer_dim, self.batch_size, self.hidden_dim)
+            cn = torch.zeros(self.layer_dim * 2, self.batch_size, self.hidden_dim)
         return hn, cn
 
     def __init__(self, input_dim, hidden_dim, layer_dim, output_dim, seq_dim):
@@ -52,10 +52,10 @@ class LSTMModel(nn.Module):
         # Building your LSTM
         # batch_first=True causes input/output tensors to be of shape
         # (batch_dim, seq_dim, feature_dim)
-        self.lstm = nn.LSTM(self.input_dim, hidden_dim, layer_dim, batch_first=True)
+        self.lstm = nn.LSTM(self.input_dim, hidden_dim, layer_dim, batch_first=True, bidirectional=True, dropout= 0.4)
 
         # Readout layer
-        self.fc = nn.Linear(hidden_dim, output_dim)
+        self.fc = nn.Linear(hidden_dim * 2, output_dim)
         self.relu = nn.ReLU()
         self.softmax = nn.Softmax(dim=1)
         self.seq_dim = seq_dim

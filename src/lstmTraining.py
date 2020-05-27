@@ -146,90 +146,89 @@ def train(csv_file, ActivityIdList):
     # Split the data into test and train
     trainDataFrame, testDataFrame  = splitDatasetIntoTrainAndTest(df)
 
+    # Make Train DataLoader
+    trainDataseq = create_inout_sequences(trainDataFrame, config['seq_dim'])
+    trainDataset = datasetCSV(trainDataseq, config['seq_dim'])
+    trainLoader = DataLoader(trainDataset, batch_size=config['batch_size'], shuffle=False,
+                             num_workers=config['num_workers'],
+                             drop_last=True)
+
     # Generate Test DataLoader
-    testData = create_inout_sequences(testDataFrame, config['seq_dim'])
-    testLoader = DataLoader(testData, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'],
+    testDataseq = create_inout_sequences(testDataFrame, config['seq_dim'])
+    testDataset = datasetCSV(testDataseq, config['seq_dim'])
+    testLoader = DataLoader(testDataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'],
                             drop_last=True)
 
-    training(config['num_epochs'], trainDataFrame, optimizer, model, criterion, config['seq_dim'], config['input_dim'], config['batch_size'], df, testLoader, start_epoch, file_name)
+
+    training(config['num_epochs'], trainLoader, optimizer, model, criterion, config['seq_dim'], config['input_dim'], config['batch_size'], df, testLoader, start_epoch, file_name)
 
     evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
-             batch_size=config['batch_size'])
+             config['batch_size'], criterion)
+
+def log_mean_class_accuracy(writer, per_class_accuracy, epoch, datasettype):
+    # Logging mean class accuracy
+    d = {}
+    for i in range(len(per_class_accuracy)):
+        d[getClassnameFromID(i)] = per_class_accuracy[i]
+
+    writer.add_scalars(datasettype + 'Mean_class_Accuracy', d, epoch + 1)
+
+
 
 # Train the Network
-def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, input_dim, batch_size, df, testLoader, start_epoch, file_name):
+def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, input_dim, batch_size, df, testLoader, start_epoch, file_name):
 
     # for each random run select the random point and minute to run for
     # do this for each random point
 
     writer = SummaryWriter(os.path.join('../logs', file_name, 'lstm'))
-    # Get Start Index(Subset) for each of the activity
-    activitiesStartDict = getActivitiesStartIndex(trainDataFrame)
-    running_loss = 0
+
     for epoch in range(num_epochs):
+        running_loss = 0
         print('epoch', epoch + start_epoch)
         # Get Start Index(Subset) for each of the activity and the minutes to run for
-        for index in range(config['no_of_subset']):
-            trainData = []
-            randomSelectedSubsets = []
-            minutesToRunFor = []
-            for i, key in enumerate(activitiesStartDict.keys()):
-                activityIndexList = activitiesStartDict[key]
-                randomSelectedSubsets.append(random.choice(activityIndexList) - config['subset_overlap_length'])
-                minutesToRunFor.append(random.choice(range(20, 30)))
+        hn, cn = model.init_hidden(batch_size)
+        for i, (input, label) in enumerate(trainLoader):
 
-            sorted_index = sorted(randomSelectedSubsets)
+            hn.detach_()
+            cn.detach_()
+            input = input.view(-1, seq_dim, input_dim)
 
-            for index,(time_to_start_from) in enumerate(sorted_index):
+            if torch.cuda.is_available():
+                input = input.float().cuda()
+                label = label.cuda()
+            else:
+                input = input.float()
+                label = label
 
-                results = \
-                create_inout_sequences(trainDataFrame[time_to_start_from: time_to_start_from + minutesToRunFor[i]],
-                                       config['seq_dim'])
-                trainData.extend(results)
+            # Forward pass to get output/logits
+            output, (hn, cn) = model((input, (hn, cn)))
 
-            # Make Train DataLoader
-            trainDataset = datasetCSV(trainData, config['seq_dim'])
-            trainLoader = DataLoader(trainDataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'],
-                                     drop_last=True)
+            # l1_regularization = torch.tensor(0)
+            # for param in model.parameters():
+            #     l1_regularization += torch.norm(param, 1) ** 2
+            # loss = loss + config['decay'] * l1_regularization
+            # Calculate Loss: softmax --> cross entropy loss
 
-            hn, cn = model.init_hidden(batch_size)
-            for i, (input, label) in enumerate(trainLoader):
-                hn.detach_()
-                cn.detach_()
-                input = input.view(-1, seq_dim, input_dim)
-
-                if torch.cuda.is_available():
-                    input = input.float().cuda()
-                    label = label.cuda()
-                else:
-                    input = input.float()
-                    label = label
-
-                # Forward pass to get output/logits
-                output, (hn, cn) = model((input, (hn, cn)))
-
-                # l1_regularization = torch.tensor(0)
-                # for param in model.parameters():
-                #     l1_regularization += torch.norm(param, 1) ** 2
-                # loss = loss + config['decay'] * l1_regularization
-                # Calculate Loss: softmax --> cross entropy loss
-                loss = criterion(output, label)#weig pram
-                running_loss += loss
-                loss.backward()  # Backward pass
-                # if (i) % config["accumulation_steps"] -1 == 0:  # Wait for several backward steps
-                optimizer.step()  # Now we can do an optimizer step
-                optimizer.zero_grad()  # Reset gradients tensors
+            loss = criterion(output, label)#weig pram
+            running_loss += loss
+            loss.backward()  # Backward pass
+            optimizer.step()  # Now we can do an optimizer step
+            optimizer.zero_grad()  # Reset gradients tensors
 
         if epoch % 10 == 0:
-            accuracy, per_class_accuracy = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
-                 batch_size=config['batch_size'])
+            accuracy, per_class_accuracy, trainLoss = evaluate(trainLoader, model, config['seq_dim'], config['input_dim'], config['batch_size'], criterion)
+            writer.add_scalar('train' + 'Accuracy', accuracy, epoch + start_epoch + 1)
+            log_mean_class_accuracy(writer, per_class_accuracy, epoch + 1, datasettype='train')
+            # Loggin trainloss
+            writer.add_scalar('train Loss', trainLoss, epoch + start_epoch+ 1)
 
-            # Logging mean class accuracy
-            d = {}
-            for i in range(len(per_class_accuracy)):
-                d[getClassnameFromID(i)] = per_class_accuracy[i]
-
-            writer.add_scalars('Mean_class_Accuracy', d, epoch + 1)
+            accuracy, per_class_accuracy, testLoss = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
+                 config['batch_size'], criterion)
+            writer.add_scalar('test' + 'Accuracy', accuracy, epoch + start_epoch+ 1)
+            log_mean_class_accuracy(writer, per_class_accuracy, epoch + start_epoch + 1, datasettype='test')
+            # Loggin test loss
+            writer.add_scalar('test Loss', testLoss, epoch + start_epoch+ 1)
 
             save_checkpoint({
                 'epoch': epoch + 1,
@@ -239,24 +238,24 @@ def training(num_epochs, trainDataFrame,  optimizer, model, criterion, seq_dim, 
 
             for tag, value in model.named_parameters():
                 tag = tag.replace('.', '/')
-                print(value.grad.data.cpu().numpy())
-                writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + 1)
+                # print(value.grad.data.cpu().numpy())
+                writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + start_epoch+ 1)
 
             # plot weights historgram
             for key in model.lstm.state_dict():
-                writer.add_histogram(key, model.lstm.state_dict()[key].data.cpu().numpy(), epoch + 1)
+                writer.add_histogram(key, model.lstm.state_dict()[key].data.cpu().numpy(), epoch + start_epoch+ 1)
             for key in model.fc.state_dict():
-                writer.add_histogram(key, model.fc.state_dict()[key].data.cpu().numpy(), epoch + 1)
+                writer.add_histogram(key, model.fc.state_dict()[key].data.cpu().numpy(), epoch + start_epoch+ 1)
 
-        # Loggin loss
-        writer.add_scalar('Loss', running_loss, epoch + 1)
+
+
         print('%d loss: %.3f' %
               (epoch + 1,  running_loss))
         running_loss = 0
 
 
 # Evaluate the network
-def evaluate(testLoader, model, seq_dim, input_dim, batch_size):
+def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
     # Initialize the prediction and label lists(tensors)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -266,8 +265,10 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size):
     total = 0
     # Iterate through test dataset
     with torch.no_grad():
+
+        hn, cn = model.init_hidden(batch_size)
         for input, labels in testLoader:
-            hn, cn = model.init_hidden(batch_size)
+
             input = input.view(-1, seq_dim, input_dim)
             # Load images to a Torch Variable
             if torch.cuda.is_available():
@@ -279,17 +280,21 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size):
             # Forward pass only to get logits/output
             output, (hn, cn) = model((input, (hn, cn)))
 
+            loss = criterion(output, labels)  # weig pram
+
             # Get predictions from the maximum value
             _, predicted = torch.max(output, 1)
             # Total number of labels
             total += labels.size(0)
             # Total correct predictions
             if torch.cuda.is_available():
-                print(predicted.cpu(), labels.cpu())
+                # print(predicted.cpu(), labels.cpu())
                 correct += (predicted.cpu() == labels.cpu()).sum()
+                # print(correct)
             else:
-                print(predicted, labels)
+                # print(predicted, labels)
                 correct += (predicted == labels).sum()
+                # print(correct)
             for t, p in zip(labels.view(-1), predicted.view(-1)):
                 confusion_matrix[t.long(), p.long()] += 1
     print('per class accuracy')
@@ -315,7 +320,7 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size):
 
     # Print Accuracy
     print('Accuracy: {}'.format(accuracy))
-    return accuracy, per_class_acc
+    return accuracy, per_class_acc, loss
 
 if __name__ == "__main__":
     if sys.argv[1] != None:
