@@ -10,6 +10,7 @@ from sklearn.model_selection import LeaveOneOut
 import datetime
 from datetime import datetime
 from torch.utils.data.sampler import Sampler, WeightedRandomSampler
+from sklearn.metrics import f1_score
 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -73,11 +74,11 @@ def create_inout_sequences(input_data, tw ):
         train_seq = train_seq.values
         train_label = input_data.iloc[i:i+tw, input_data.columns.isin(['activity'])]
         train_label = train_label.values
-
-        (values, counts) = np.unique(train_label, return_counts=True)
-        ind = np.argmax(counts)
-        train_label = values[ind]
-        train_label = getIDFromClassName(train_label)
+        # (values, counts) = np.unique(train_label, return_counts=True)
+        # ind = np.argmax(counts)
+        # train_label = values[ind]
+        for i in range(len(train_label)):
+            train_label[i] = getIDFromClassName(train_label[i])
         inout_seq.append((train_seq, train_label))
     return inout_seq
 
@@ -136,13 +137,13 @@ def train(csv_file, ActivityIdList):
     else:
         class_weights = torch.tensor(classFrequenciesList).float()
 
-    model = LSTM(13, 32)
+    model = LSTM(23, 32)
     if torch.cuda.is_available():
         model.cuda()
 
     print('cuda available: ', torch.cuda.is_available())
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(weight = class_weights)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config['learning_rate'], weight_decay=config['decay'])
 
@@ -168,7 +169,7 @@ def train(csv_file, ActivityIdList):
     trainDataset = datasetCSV(trainDataseq, config['seq_dim'])
     trainLoader = DataLoader(trainDataset, batch_size=config['batch_size'], shuffle=False,
                              num_workers=config['num_workers'],
-                             drop_last=True, sampler= getWeightedSampler(trainDataseq))
+                             drop_last=True)
 
     # Generate Test DataLoader
     testDataseq = create_inout_sequences(testDataFrame, config['seq_dim'])
@@ -215,8 +216,10 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
                 input = input.float()
                 label = label
 
-            # Forward pass to get output/logits
             output, (hn,cn) = model((input))
+            output = output.view(-1, output.size(2))
+            label = label.view(-1, label.size(2)).squeeze()
+
 
             # l1_regularization = torch.tensor(0)
             # for param in model.parameters():
@@ -227,22 +230,25 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
             loss = criterion(output, label)#weig pram
             running_loss += loss
             loss.backward()  # Backward pass
-            optimizer.step()  # Now we can do an optimizer step
+            optimizer.step()  # Now we can do an optimizer stepx`
             optimizer.zero_grad()  # Reset gradients tensors
 
         if epoch % 10 == 0:
-            accuracy, per_class_accuracy, trainLoss = evaluate(trainLoader, model, config['seq_dim'], config['input_dim'], config['batch_size'], criterion)
+            accuracy, per_class_accuracy, trainLoss, f1 = evaluate(trainLoader, model, config['seq_dim'], config['input_dim'], config['batch_size'], criterion)
             writer.add_scalar('train' + 'Accuracy', accuracy, epoch + start_epoch + 1)
             log_mean_class_accuracy(writer, per_class_accuracy, epoch + 1, datasettype='train')
             # Loggin trainloss
             writer.add_scalar('train Loss', trainLoss, epoch + start_epoch+ 1)
+            writer.add_scalar('train f1', f1, epoch + start_epoch + 1)
 
-            accuracy, per_class_accuracy, testLoss = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
+            accuracy, per_class_accuracy, testLoss, f1 = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
                  config['batch_size'], criterion)
             writer.add_scalar('test' + 'Accuracy', accuracy, epoch + start_epoch+ 1)
             log_mean_class_accuracy(writer, per_class_accuracy, epoch + start_epoch + 1, datasettype='test')
             # Loggin test loss
             writer.add_scalar('test Loss', testLoss, epoch + start_epoch+ 1)
+
+            writer.add_scalar('test f1', f1, epoch + start_epoch + 1)
 
             save_checkpoint({
                 'epoch': epoch + 1,
@@ -261,8 +267,6 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
             # for key in model.fc.state_dict():
             #     writer.add_histogram(key, model.fc.state_dict()[key].data.cpu().numpy(), epoch + start_epoch+ 1)
 
-
-
         print('%d loss: %.3f' %
               (epoch + 1,  running_loss))
         running_loss = 0
@@ -279,9 +283,8 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
     total = 0
     # Iterate through test dataset
     with torch.no_grad():
-
+        f1 = 0
         for input, labels in testLoader:
-
             input = input.view(-1, seq_dim, input_dim)
             # Load images to a Torch Variable
             if torch.cuda.is_available():
@@ -293,10 +296,14 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
             # Forward pass only to get logits/output
             output, (hn, cn) = model(input)
 
+            output = output.view(-1, output.size(2))
+            labels = labels.view(-1, labels.size(2)).squeeze()
+
             loss = criterion(output, labels)  # weig pram
 
             # Get predictions from the maximum value
             _, predicted = torch.max(output, 1)
+            f1 += f1_score(labels, predicted,average='weighted')
             # Total number of labels
             total += labels.size(0)
             # Total correct predictions
@@ -310,6 +317,8 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
                 # print(correct)
             for t, p in zip(labels.view(-1), predicted.view(-1)):
                 confusion_matrix[t.long(), p.long()] += 1
+    print(f1)
+
     print('per class accuracy')
     per_class_acc = confusion_matrix.diag() / confusion_matrix.sum(1)
     per_class_acc = per_class_acc.cpu().numpy()
@@ -333,7 +342,7 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
 
     # Print Accuracy
     print('Accuracy: {}'.format(accuracy))
-    return accuracy, per_class_acc, loss
+    return accuracy, per_class_acc, loss, f1
 
 if __name__ == "__main__":
     if sys.argv[1] != None:
