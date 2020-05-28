@@ -113,10 +113,16 @@ def getWeightedSampler(trainData):
 
 
 def train(csv_file, ActivityIdList):
+    total_num_iteration_for_LOOCV = 0
+    total_acc_for_LOOCV = 0
 
     df = pd.read_csv(csv_file)
     # Get class Frequency as a dictionary
-    classFrequencyDict = df['activity'].value_counts().to_dict()
+
+    # Split the data into test and train
+    trainDataFrame, testDataFrame  = splitDatasetIntoTrainAndTest(df)
+
+    classFrequencyDict = trainDataFrame['activity'].value_counts().to_dict()
     temp_dict ={}
 
     # Initialize the dict and set frequ value 0 intially because weight tensor in Loss requires all the classes values
@@ -132,12 +138,13 @@ def train(csv_file, ActivityIdList):
     classFrequenciesList = np.array([value for key, value in sorted(temp_dict.items())])
     classFrequenciesList = 1/classFrequenciesList
     classFrequenciesList[classFrequenciesList == np.inf] = 0
+
     if torch.cuda.is_available():
         class_weights = torch.tensor(classFrequenciesList).float().cuda()
     else:
         class_weights = torch.tensor(classFrequenciesList).float()
 
-    model = LSTM(23, 32)
+    model = LSTM(config['input_dim'], config['hidden_dim'])
     if torch.cuda.is_available():
         model.cuda()
 
@@ -161,8 +168,6 @@ def train(csv_file, ActivityIdList):
         print("=> no checkpoint found at '{}'".format(path))
 
 
-    # Split the data into test and train
-    trainDataFrame, testDataFrame  = splitDatasetIntoTrainAndTest(df)
 
     # Make Train DataLoader
     trainDataseq = create_inout_sequences(trainDataFrame, config['seq_dim'])

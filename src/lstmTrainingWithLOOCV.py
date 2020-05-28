@@ -1,4 +1,7 @@
+import shutil
+
 import torch
+import random
 from matplotlib.lines import Line2D
 from torch.utils.data import DataLoader
 import torch.nn as nn
@@ -6,10 +9,11 @@ import sys
 from sklearn.model_selection import LeaveOneOut
 import datetime
 from datetime import datetime
-
+from torch.utils.data.sampler import Sampler, WeightedRandomSampler
+from sklearn.metrics import f1_score
 from torch.utils.tensorboard import SummaryWriter
 
-from src.network import LSTMModel
+from src.network import LSTM
 import numpy as np
 import seaborn as sn
 import pandas as pd
@@ -18,11 +22,11 @@ import matplotlib.pyplot as plt
 from src.dataLoader import datasetCSV
 import torch.utils.tensorboard
 from config.config import config
-
+import os
 # give an index(date) start and end index
 def getStartAndEndIndex(df, test_index):
     # this line converts the string object in Timestamp object
-    date = df['start'].iloc[test_index].item()
+    date = df['start'].iloc[test_index]
     index = df.index[df['start'] == date].tolist()
     # get start and end of this date
     return index[0], index[-1]
@@ -30,60 +34,86 @@ def getStartAndEndIndex(df, test_index):
 # Give all unique dates index
 def getUniqueStartIndex(df):
     # this line converts the string object in Timestamp object
-    df['start'] = [datetime.strptime(d, '%d-%b-%Y %H:%M:%S') for d in df["start"]]
+    if isinstance(df['start'][0], str):
+        df['start'] = [datetime.strptime(d, '%d-%b-%Y %H:%M:%S') for d in df["start"]]
     # extracting date from timestamp
-    df['start'] = [datetime.date(d) for d in df['start']]
+    if isinstance(df['start'][0], datetime):
+        df['start'] = [datetime.date(d) for d in df['start']]
     s = df['start']
     return s[s.diff().dt.days != 0].index.values
 
-def getIDFromClassName(train_label):
-    ActivityIdList = [
+# Give all index of new activity starting
+def getActivitiesStartIndex(df):
+    s = df['activity']
+    activityStartIndexes = np.array(s[s.ne(s.shift(-1)) == True].index.values)
+    activityStartIndexes = np.insert(activityStartIndexes, 0, 4, axis= 0)
+    activityStartDict = {}
+    for index in activityStartIndexes[:-1]:
+        activityName = s[index+1]
+        activityStartDict.setdefault(activityName, []).append(index + 1)
+    return activityStartDict
 
-        {"name": "idle", "id": 0},
-        {"name": "leaveHouse", "id": 1},
-        {"name": "useToilet", "id": 2},
-        {"name": "takeShower", "id": 3},
-        {"name": "brushTeeth", "id": 4},
-        {"name": "goToBed", "id": 5},
-        {"name": "getDressed", "id": 6},
-        {"name": "prepareBreakfast", "id": 7},
-        {"name": "prepareDinner", "id": 8},
-        {"name": "getSnack", "id": 9},
-        {"name": "getDrink", "id": 10},
-        {"name": "loadDishwasher", "id": 11},
-        {"name": "unloadDishwasher", "id": 12},
-        {"name": "storeGroceries", "id": 13},
-        {"name": "washDishes", "id": 14},
-        {"name": "answerPhone", "id": 15},
-        {"name": "eatDinner", "id": 16},
-        {"name": "eatBreakfast", "id": 17}
-    ]
+
+def getIDFromClassName(train_label):
+    ActivityIdList = config['ActivityIdList']
     train_label = [x for x in ActivityIdList if x["name"] == train_label]
     return train_label[0]['id']
 
+def getClassnameFromID(train_label):
+    ActivityIdList = config['ActivityIdList']
+    train_label = [x for x in ActivityIdList if x["id"] == int(train_label)]
+    return train_label[0]['name']
+
 # Create sequence of input and output depending upon the window size
-def create_inout_sequences(input_data, label, tw ):
+def create_inout_sequences(input_data, tw ):
     inout_seq = []
     L = len(input_data)
     for i in range(L-tw):
         train_seq = input_data.iloc[i:i+tw, ~input_data.columns.isin(['activity', 'start', 'end'])]
         train_seq = train_seq.values
-        train_label = label.iloc[i+tw:i+tw+1]
+        train_label = input_data.iloc[i:i+tw, input_data.columns.isin(['activity'])]
         train_label = train_label.values
-        train_label = getIDFromClassName(train_label)
+        # (values, counts) = np.unique(train_label, return_counts=True)
+        # ind = np.argmax(counts)
+        # train_label = values[ind]
+        for i in range(len(train_label)):
+            train_label[i] = getIDFromClassName(train_label[i])
         inout_seq.append((train_seq, train_label))
     return inout_seq
 
-def train(file_name, ActivityIdList):
-    total_num_iteration_for_LOOCV = 0
-    total_acc_for_LOOCV = 0
+def splitDatasetIntoTrainAndTest(df):
+    testDataFrame = pd.DataFrame([])
+    trainDataFrame = pd.DataFrame([])
+    trainDataFrame = df[0 : int(df.shape[0] * config['split_ratio'])]
+    testDataFrame = df[int(df.shape[0] * config['split_ratio']) : df.shape[0]]
+    return trainDataFrame, testDataFrame
 
-    csv_file = file_name + '.csv'
-    df = pd.read_csv(csv_file)
+def save_checkpoint(state, is_best, filename='checkpoint_lstm.pth.tar'):
+    saved_model_path = os.path.join("../saved_model/lstm/model_best.pth.tar")
+    torch.save(state, filename)
+    if is_best:
+        shutil.copyfile(filename, saved_model_path)
 
+def getWeightedSampler(trainData):
+    target = [trainData[x][1] for x in range(len(trainData))]
+    class_sample_count = []
+    for t in np.unique(target):
+        class_sample_count.append([t, len(np.where(target == t)[0])])
+
+    weights = np.zeros(np.max(target) + 1)
+    for val in class_sample_count:
+        weights[val[0]] = 1/val[1]
+
+    samples_weights = np.array([weights[t] for t in target])
+
+    sampler = WeightedRandomSampler(weights=samples_weights,num_samples=len(samples_weights))
+    return sampler
+
+def getWeightedLoss(trainDataFrame):
     # Get class Frequency as a dictionary
-    classFrequencyDict = df['activity'].value_counts().to_dict()
-    temp_dict ={}
+    classFrequencyDict = trainDataFrame['activity'].value_counts().to_dict()
+    temp_dict = {}
+
     # Initialize the dict and set frequ value 0 intially because weight tensor in Loss requires all the classes values
     for dict in ActivityIdList:
         temp_dict[dict['id']] = 0
@@ -95,67 +125,123 @@ def train(file_name, ActivityIdList):
 
     # Sort it according to the class labels
     classFrequenciesList = np.array([value for key, value in sorted(temp_dict.items())])
-    classFrequenciesList = classFrequenciesList/np.sum(classFrequenciesList)
-    uniqueIndex = getUniqueStartIndex(df)
-    loo = LeaveOneOut()
+    classFrequenciesList = 1 / classFrequenciesList
+    classFrequenciesList[classFrequenciesList == np.inf] = 0
 
+    if torch.cuda.is_available():
+        class_weights = torch.tensor(classFrequenciesList).float().cuda()
+    else:
+        class_weights = torch.tensor(classFrequenciesList).float()
+
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    return criterion
+
+def train(csv_file, ActivityIdList):
+    total_num_iteration_for_LOOCV = 0
+    total_acc_for_LOOCV = 0
+    score = 0
+
+    # read csv File
+    df = pd.read_csv(csv_file)
+    df = df[:2000]
+    # Generate unique index for each day in csv
+    uniqueIndex = getUniqueStartIndex(df)
+
+    # leave one out
+    loo = LeaveOneOut()
     print('Total splits: ', len(uniqueIndex) - 1)
     print('Total Epochs per split:', config['num_epochs'])
+
+    # Generate split over uniqueIndex and train and evaluate over it
     for train_index, test_index in loo.split(uniqueIndex):
-        model = LSTMModel(config['input_dim'], config['hidden_dim'], config['layer_dim'],config['output_dim'], config['seq_dim'])
+        model = LSTM(config['input_dim'], config['hidden_dim'])
         if torch.cuda.is_available():
             model.cuda()
         print('cuda available: ', torch.cuda.is_available())
-        if torch.cuda.is_available():
-            class_weights = torch.tensor(classFrequenciesList).float().cuda()
-        else:
-            class_weights = torch.tensor(classFrequenciesList).float()
 
-        criterion = nn.CrossEntropyLoss(weight = class_weights)
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
         optimizer = torch.optim.Adam(model.parameters(), lr=config['learning_rate'], weight_decay=config['decay'])
+
+        path = "../saved_model/lstm/model_best.pth.tar"
+        start_epoch = 0
+
+        # Load Saved Model if exists
+        if os.path.isfile(path):
+            print("=> loading checkpoint '{}'".format(path))
+            checkpoint = torch.load(path)
+            model.load_state_dict(checkpoint['state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            start_epoch += checkpoint['epoch']
+            print("=> loaded checkpoint '{}' (epoch {})"
+                  .format(path, checkpoint['epoch']))
+        else:
+            print("=> no checkpoint found at '{}'".format(path))
 
         # Get start and end of test dataset
         start, end = getStartAndEndIndex(df, uniqueIndex[test_index])
 
-        # df = df.astype('float32')
-
         # make dataframe for train, skip everything b/w test start and test end. rest everything is train.
-        if start!=0:
-            dfFrames = [df[:start - 1], df[end + 1:]]
-            df1Frames = [df['activity'][:start - 1], df['activity'][end + 1:]]
-            dfFrames = pd.concat(dfFrames)
-            df1Frames = pd.concat(df1Frames)
+        if start != 0:
+            trainDataFrame = df[:start - 1,  end + 1:]
         else:
-            dfFrames = df[end + 1:]
-            df1Frames = df['activity'][end + 1:]
+            trainDataFrame = df[end + 1:]
+
+        # get Weighted Loss
+        criterion = getWeightedLoss(trainDataFrame)
+
         # generate train sequence list based upon above dataframe.
-        trainData = create_inout_sequences(dfFrames, df1Frames, config['seq_dim'])
+        trainDataseq = create_inout_sequences(trainDataFrame, config['seq_dim'])
+
+        # Make Test DataLoader
+        testDataFrame = df[start - config['seq_dim']: end]
+        testDataSeq = create_inout_sequences(testDataFrame, config['seq_dim'])
+        testLoader = DataLoader(testDataSeq, batch_size=config['batch_size'], shuffle=False,
+                                num_workers=config['num_workers'], drop_last=True)
 
         # Make Train DataLoader
-        trainDataset = datasetCSV(trainData, config['seq_dim'])
-        trainLoader = DataLoader(trainDataset, batch_size=config['batch_size'], shuffle=False, num_workers=8, drop_last=True)
-        training(config['num_epochs'], trainLoader, optimizer, model, criterion, config['seq_dim'], config['input_dim'], config['batch_size'])
+        trainDataset = datasetCSV(trainDataseq, config['seq_dim'])
+        trainLoader = DataLoader(trainDataset, batch_size=config['batch_size'], shuffle=False,
+                                 num_workers=config['num_workers'],
+                                 drop_last=True)
+
+        training(config['num_epochs'], trainLoader, optimizer, model, criterion, config['seq_dim'],
+                 config['input_dim'], config['batch_size'],
+                 df, testLoader, start_epoch, file_name)
 
         # Generate Test DataLoader
         if start - config['seq_dim'] > 0:
-            test_inputs = df[start - config['seq_dim']: end]
-            test_labels = df['activity'][start - config['seq_dim']: end]
-            testData = create_inout_sequences(test_inputs, test_labels, config['seq_dim'])
-            testLoader = DataLoader(testData, batch_size=config['batch_size'], shuffle=False, num_workers=8, drop_last=True)
-            total_acc_for_LOOCV += evaluate(testLoader, model, config['seq_dim'], config['input_dim'], len(ActivityIdList), batch_size=config['batch_size'])
-    print('avg accuracy i: ,', (total_acc_for_LOOCV/(total_num_iteration_for_LOOCV - 1)), '%')
+            _, _, _, f1 = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
+                 config['batch_size'], criterion)
+            score += f1
+
+    print('avg accuracy i: ,', (score / (total_num_iteration_for_LOOCV - 1)))
+
+
+def log_mean_class_accuracy(writer, per_class_accuracy, epoch, datasettype):
+    # Logging mean class accuracy
+    d = {}
+    for i in range(len(per_class_accuracy)):
+        d[getClassnameFromID(i)] = per_class_accuracy[i]
+
+    writer.add_scalars(datasettype + 'Mean_class_Accuracy', d, epoch + 1)
+
+
 
 # Train the Network
-def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, input_dim, batch_size,accumulation_steps=5):
-    writer = SummaryWriter('../logs')
+def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, input_dim, batch_size, df, testLoader, start_epoch, file_name):
+
+    # for each random run select the random point and minute to run for
+    # do this for each random point
+
+    writer = SummaryWriter(os.path.join('../logs', file_name, 'lstm'))
+
     for epoch in range(num_epochs):
-        hn, cn = model.init_hidden(batch_size)
-        flag = True
         running_loss = 0
+        print('epoch', epoch + start_epoch)
+        # Get Start Index(Subset) for each of the activity and the minutes to run for
         for i, (input, label) in enumerate(trainLoader):
-            hn.detach_()
-            cn.detach_()
+
             input = input.view(-1, seq_dim, input_dim)
 
             if torch.cuda.is_available():
@@ -165,80 +251,120 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
                 input = input.float()
                 label = label
 
-            if flag:  # beginning of sequence of data you want cell states from or when no longer need past cell state and starting fresh again
-                flag = False
-                hn, cn = model.init_hidden(batch_size)
+            output, (hn,cn) = model((input))
+            output = output.view(-1, output.size(2))
+            label = label.view(-1, label.size(2)).squeeze()
 
 
-            # Forward pass to get output/logits
-            output, (hn, cn) = model((input, (hn, cn)))
-
+            # l1_regularization = torch.tensor(0)
+            # for param in model.parameters():
+            #     l1_regularization += torch.norm(param, 1) ** 2
+            # loss = loss + config['decay'] * l1_regularization
             # Calculate Loss: softmax --> cross entropy loss
+
             loss = criterion(output, label)#weig pram
             running_loss += loss
-            loss = loss / accumulation_steps  # Normalize our loss (if averaged)
             loss.backward()  # Backward pass
-            if (i) % accumulation_steps == 0:  # Wait for several backward steps
-                optimizer.step()  # Now we can do an optimizer step
-                optimizer.zero_grad()  # Reset gradients tensors
+            optimizer.step()  # Now we can do an optimizer stepx`
+            optimizer.zero_grad()  # Reset gradients tensors
+
+        if epoch % 10 == 0:
+            accuracy, per_class_accuracy, trainLoss, f1 = evaluate(trainLoader, model, config['seq_dim'], config['input_dim'], config['batch_size'], criterion)
+            # writer.add_scalar('train' + 'Accuracy', accuracy, epoch + start_epoch + 1)
+            # log_mean_class_accuracy(writer, per_class_accuracy, epoch + 1, datasettype='train')
+            # Loggin trainloss
+            # writer.add_scalar('train Loss', trainLoss, epoch + start_epoch+ 1)
+            # writer.add_scalar('train f1', f1, epoch + start_epoch + 1)
+
+            accuracy, per_class_accuracy, testLoss, f1 = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
+                 config['batch_size'], criterion)
+            # writer.add_scalar('test' + 'Accuracy', accuracy, epoch + start_epoch+ 1)
+            # log_mean_class_accuracy(writer, per_class_accuracy, epoch + start_epoch + 1, datasettype='test')
+            # # Loggin test loss
+            # writer.add_scalar('test Loss', testLoss, epoch + start_epoch+ 1)
+            #
+            # writer.add_scalar('test f1', f1, epoch + start_epoch + 1)
+
+            save_checkpoint({
+                'epoch': epoch + 1,
+                'state_dict': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+            }, True)
+
+            # for tag, value in model.named_parameters():
+            #     tag = tag.replace('.', '/')
+            #     # print(value.grad.data.cpu().numpy())
+            #     writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + start_epoch+ 1)
 
 
-            if i % 10 == 0:  # print every 10 mini-batches
-                print('[%d, %5d] loss: %.3f' %
-                      (epoch + 1, i + 1, running_loss / 10))
-                running_loss = 0.0
-                # flag = True
+        print('%d loss: %.3f' %
+              (epoch + 1,  running_loss))
+        running_loss = 0
 
 
-        for tag, value in model.named_parameters():
-            tag = tag.replace('.', '/')
-            writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + 1)
 # Evaluate the network
-def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
+def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
     # Initialize the prediction and label lists(tensors)
-    predlist = torch.zeros(0, dtype=torch.long, device='cpu')
-    lbllist = torch.zeros(0, dtype=torch.long, device='cpu')
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+    nb_classes = config['output_dim']
+    confusion_matrix = torch.zeros(nb_classes, nb_classes)
     correct = 0
     total = 0
     # Iterate through test dataset
-    hn, cn = model.init_hidden(batch_size)
     with torch.no_grad():
+        f1 = 0
         for input, labels in testLoader:
-            hn.detach_()
-            cn.detach_()
             input = input.view(-1, seq_dim, input_dim)
             # Load images to a Torch Variable
             if torch.cuda.is_available():
                 input = input.float().cuda()
+                labels = labels.cuda()
             else:
                 input = input.float()
 
             # Forward pass only to get logits/output
-            output, (hn, cn) = model((input, (hn, cn)))
+            output, (hn, cn) = model(input)
+
+            output = output.view(-1, output.size(2))
+            labels = labels.view(-1, labels.size(2)).squeeze()
+
+            loss = criterion(output, labels)  # weig pram
 
             # Get predictions from the maximum value
             _, predicted = torch.max(output, 1)
+            f1 += f1_score(labels, predicted,average='weighted')
             # Total number of labels
             total += labels.size(0)
             # Total correct predictions
             if torch.cuda.is_available():
-                print(predicted.cpu(), labels.cpu())
+                # print(predicted.cpu(), labels.cpu())
                 correct += (predicted.cpu() == labels.cpu()).sum()
+                # print(correct)
             else:
-                print(predicted, labels)
+                # print(predicted, labels)
                 correct += (predicted == labels).sum()
-            # Append batch prediction results
-            predlist = torch.cat([predlist, predicted.view(-1).cpu()])
-            lbllist = torch.cat([lbllist, labels.view(-1).cpu()])
+                # print(correct)
+            for t, p in zip(labels.view(-1), predicted.view(-1)):
+                confusion_matrix[t.long(), p.long()] += 1
+    print(f1)
 
-    # Confusion matrix
-    # conf_mat = confusion_matrix(lbllist.numpy(), predlist.numpy())
-    # print(conf_mat)
+    print('per class accuracy')
+    per_class_acc = confusion_matrix.diag() / confusion_matrix.sum(1)
+    per_class_acc = per_class_acc.cpu().numpy()
+    per_class_acc[np.isnan(per_class_acc)] = -1
+    print(confusion_matrix.diag())
+    print(confusion_matrix.sum(1))
+    d ={}
+    for i, entry in enumerate(per_class_acc):
+        if entry != -1:
+            d[getClassnameFromID(i)] = entry
+    print(d)
+    pd.isnull(np.array([np.nan, -1], dtype=float))
 
-    # df_cm = pd.DataFrame(conf_mat, index=[i for i in range(conf_mat.shape[0])],
-    #                      columns=[i for i in range(conf_mat.shape[0])])
-    # plt.figure(figsize=(10, 7))
+    df_cm = pd.DataFrame(confusion_matrix, index=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])],
+                         columns=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])], dtype=float)
+    # plt.figure(figsize=(20, 20))
     # sn.heatmap(df_cm, annot=True)
     # plt.show()
 
@@ -246,34 +372,17 @@ def evaluate(testLoader, model, seq_dim, input_dim, nb_classes, batch_size):
 
     # Print Accuracy
     print('Accuracy: {}'.format(accuracy))
-    return accuracy
+    return accuracy, per_class_acc, loss, f1
+
 if __name__ == "__main__":
     if sys.argv[1] != None:
-        ActivityIdList = [
-
-            {"name": "idle", "id": 0},
-            {"name": "leaveHouse", "id": 1},
-            {"name": "useToilet", "id": 2},
-            {"name": "takeShower", "id": 3},
-            {"name": "brushTeeth", "id": 4},
-            {"name": "goToBed", "id": 5},
-            {"name": "getDressed", "id": 6},
-            {"name": "prepareBreakfast", "id": 7},
-            {"name": "prepareDinner", "id": 8},
-            {"name": "getSnack", "id": 9},
-            {"name": "getDrink", "id": 10},
-            {"name": "loadDishwasher", "id": 11},
-            {"name": "unloadDishwasher", "id": 12},
-            {"name": "storeGroceries", "id": 13},
-            {"name": "washDishes", "id": 14},
-            {"name": "answerPhone", "id": 15},
-            {"name": "eatDinner", "id": 16},
-            {"name": "eatBreakfast", "id": 17}
-        ]
-        file_name = '../houseB'
-        # file_name = sys.argv[1].split('.')[0]
-        train(file_name, ActivityIdList)
-
+        file_name = sys.argv[1].split('.json')[0]
+        input_dir = os.path.join(os.getcwd(), '../', 'data', file_name)
+        csv_file_path = os.path.join(input_dir, file_name + '.csv')
+        json_file_path = os.path.join(input_dir, file_name + '.json')
+        csv_length = pd.read_csv(csv_file_path).shape[0]
+        ActivityIdList = config['ActivityIdList']
+        train(csv_file_path, ActivityIdList)
 
 
 

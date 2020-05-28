@@ -4,6 +4,8 @@ import torch.nn as nn
 from torch.nn.utils.rnn import PackedSequence
 from typing import *
 
+from config.config import config
+
 
 class VariationalDropout(nn.Module):
     """
@@ -46,7 +48,7 @@ class LSTM(nn.LSTM):
                  dropoutw: float=0., dropouto: float=0.,
                  batch_first=True, unit_forget_bias=True, **kwargs):
         super().__init__(*args, **kwargs, batch_first=batch_first)
-        self.fc = nn.Linear(32, 18)
+        self.fc = nn.Linear(config['hidden_dim'], config['output_dim'])
         self.unit_forget_bias = unit_forget_bias
         self.dropoutw = dropoutw
         self.input_drop = VariationalDropout(dropouti,
