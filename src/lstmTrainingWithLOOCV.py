@@ -26,7 +26,7 @@ import os
 # give an index(date) start and end index
 def getStartAndEndIndex(df, test_index):
     # this line converts the string object in Timestamp object
-    date = df['start'].iloc[test_index]
+    date = df['start'].iloc[test_index].item()
     index = df.index[df['start'] == date].tolist()
     # get start and end of this date
     return index[0], index[-1]
@@ -140,10 +140,11 @@ def train(csv_file, ActivityIdList):
     total_num_iteration_for_LOOCV = 0
     total_acc_for_LOOCV = 0
     score = 0
+    accuracy = 0
+    confusion_matrix = torch.zeros(config['output_dim'], config['output_dim'])
 
     # read csv File
     df = pd.read_csv(csv_file)
-    df = df[:2000]
     # Generate unique index for each day in csv
     uniqueIndex = getUniqueStartIndex(df)
 
@@ -166,24 +167,25 @@ def train(csv_file, ActivityIdList):
         path = "../saved_model/lstm/model_best.pth.tar"
         start_epoch = 0
 
-        # Load Saved Model if exists
-        if os.path.isfile(path):
-            print("=> loading checkpoint '{}'".format(path))
-            checkpoint = torch.load(path)
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            start_epoch += checkpoint['epoch']
-            print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(path, checkpoint['epoch']))
-        else:
-            print("=> no checkpoint found at '{}'".format(path))
+        # # Load Saved Model if exists
+        # if os.path.isfile(path):
+        #     print("=> loading checkpoint '{}'".format(path))
+        #     checkpoint = torch.load(path)
+        #     model.load_state_dict(checkpoint['state_dict'])
+        #     optimizer.load_state_dict(checkpoint['optimizer'])
+        #     start_epoch += checkpoint['epoch']
+        #     print("=> loaded checkpoint '{}' (epoch {})"
+        #           .format(path, checkpoint['epoch']))
+        # else:
+        #     print("=> no checkpoint found at '{}'".format(path))
 
         # Get start and end of test dataset
         start, end = getStartAndEndIndex(df, uniqueIndex[test_index])
-
         # make dataframe for train, skip everything b/w test start and test end. rest everything is train.
+
         if start != 0:
-            trainDataFrame = df[:start - 1,  end + 1:]
+            dfFrames = [df[:start - 1], df[end + 1:]]
+            trainDataFrame = pd.concat(dfFrames)
         else:
             trainDataFrame = df[end + 1:]
 
@@ -192,12 +194,15 @@ def train(csv_file, ActivityIdList):
 
         # generate train sequence list based upon above dataframe.
         trainDataseq = create_inout_sequences(trainDataFrame, config['seq_dim'])
-
+        testLoader = []
         # Make Test DataLoader
-        testDataFrame = df[start - config['seq_dim']: end]
-        testDataSeq = create_inout_sequences(testDataFrame, config['seq_dim'])
-        testLoader = DataLoader(testDataSeq, batch_size=config['batch_size'], shuffle=False,
-                                num_workers=config['num_workers'], drop_last=True)
+        if start - config['seq_dim'] > 0:
+            testDataFrame = df[start - config['seq_dim']: end]
+            testDataSeq = create_inout_sequences(testDataFrame, config['seq_dim'])
+            trainDataset = datasetCSV(testDataSeq, config['seq_dim'])
+            testLoader = DataLoader(trainDataset, batch_size=config['batch_size'], shuffle=False,
+                                     num_workers=config['num_workers'],
+                                     drop_last=True)
 
         # Make Train DataLoader
         trainDataset = datasetCSV(trainDataseq, config['seq_dim'])
@@ -207,15 +212,28 @@ def train(csv_file, ActivityIdList):
 
         training(config['num_epochs'], trainLoader, optimizer, model, criterion, config['seq_dim'],
                  config['input_dim'], config['batch_size'],
-                 df, testLoader, start_epoch, file_name)
+                 df, None, start_epoch, file_name)
 
         # Generate Test DataLoader
         if start - config['seq_dim'] > 0:
-            _, _, _, f1 = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
+            acc, _, _, f1, matrix = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
                  config['batch_size'], criterion)
             score += f1
+            confusion_matrix += matrix
+            accuracy += acc
 
-    print('avg accuracy i: ,', (score / (total_num_iteration_for_LOOCV - 1)))
+
+    print('avg score: ', (score / (total_num_iteration_for_LOOCV - 1)))
+    print('confusion matrix: ', (confusion_matrix / (total_num_iteration_for_LOOCV - 1)))
+    print('avg accuracy: ', (accuracy / (total_num_iteration_for_LOOCV - 1)))
+
+    pd.isnull(np.array([np.nan, -1], dtype=float))
+
+    df_cm = pd.DataFrame(confusion_matrix, index=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])],
+                         columns=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])], dtype=float)
+    plt.figure(figsize=(20, 20))
+    sn.heatmap(df_cm, annot=True)
+    plt.show()
 
 
 def log_mean_class_accuracy(writer, per_class_accuracy, epoch, datasettype):
@@ -256,6 +274,7 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
             label = label.view(-1, label.size(2)).squeeze()
 
 
+
             # l1_regularization = torch.tensor(0)
             # for param in model.parameters():
             #     l1_regularization += torch.norm(param, 1) ** 2
@@ -268,28 +287,28 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
             optimizer.step()  # Now we can do an optimizer stepx`
             optimizer.zero_grad()  # Reset gradients tensors
 
-        if epoch % 10 == 0:
-            accuracy, per_class_accuracy, trainLoss, f1 = evaluate(trainLoader, model, config['seq_dim'], config['input_dim'], config['batch_size'], criterion)
+        # if epoch % 10 == 0:
+            # accuracy, per_class_accuracy, trainLoss, f1, _ = evaluate(trainLoader, model, config['seq_dim'], config['input_dim'], config['batch_size'], criterion)
             # writer.add_scalar('train' + 'Accuracy', accuracy, epoch + start_epoch + 1)
             # log_mean_class_accuracy(writer, per_class_accuracy, epoch + 1, datasettype='train')
             # Loggin trainloss
             # writer.add_scalar('train Loss', trainLoss, epoch + start_epoch+ 1)
             # writer.add_scalar('train f1', f1, epoch + start_epoch + 1)
 
-            accuracy, per_class_accuracy, testLoss, f1 = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
-                 config['batch_size'], criterion)
+            # accuracy, per_class_accuracy, testLoss, f1 = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
+            #      config['batch_size'], criterion)
             # writer.add_scalar('test' + 'Accuracy', accuracy, epoch + start_epoch+ 1)
             # log_mean_class_accuracy(writer, per_class_accuracy, epoch + start_epoch + 1, datasettype='test')
             # # Loggin test loss
             # writer.add_scalar('test Loss', testLoss, epoch + start_epoch+ 1)
             #
             # writer.add_scalar('test f1', f1, epoch + start_epoch + 1)
-
-            save_checkpoint({
-                'epoch': epoch + 1,
-                'state_dict': model.state_dict(),
-                'optimizer': optimizer.state_dict(),
-            }, True)
+            #
+            # save_checkpoint({
+            #     'epoch': epoch + 1,
+            #     'state_dict': model.state_dict(),
+            #     'optimizer': optimizer.state_dict(),
+            # }, True)
 
             # for tag, value in model.named_parameters():
             #     tag = tag.replace('.', '/')
@@ -310,7 +329,7 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
     nb_classes = config['output_dim']
     confusion_matrix = torch.zeros(nb_classes, nb_classes)
     correct = 0
-    total = 0
+    total = 1
     # Iterate through test dataset
     with torch.no_grad():
         f1 = 0
@@ -347,7 +366,7 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
                 # print(correct)
             for t, p in zip(labels.view(-1), predicted.view(-1)):
                 confusion_matrix[t.long(), p.long()] += 1
-    print(f1)
+    print('F1 SCORE',f1)
 
     print('per class accuracy')
     per_class_acc = confusion_matrix.diag() / confusion_matrix.sum(1)
@@ -372,7 +391,7 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
 
     # Print Accuracy
     print('Accuracy: {}'.format(accuracy))
-    return accuracy, per_class_acc, loss, f1
+    return accuracy, per_class_acc, 0, f1, confusion_matrix
 
 if __name__ == "__main__":
     if sys.argv[1] != None:
@@ -380,7 +399,7 @@ if __name__ == "__main__":
         input_dir = os.path.join(os.getcwd(), '../', 'data', file_name)
         csv_file_path = os.path.join(input_dir, file_name + '.csv')
         json_file_path = os.path.join(input_dir, file_name + '.json')
-        csv_length = pd.read_csv(csv_file_path).shape[0]
+        # csv_length = pd.read_csv(csv_file_path).shape[0]
         ActivityIdList = config['ActivityIdList']
         train(csv_file_path, ActivityIdList)
 
