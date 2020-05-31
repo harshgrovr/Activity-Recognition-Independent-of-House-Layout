@@ -10,7 +10,7 @@ config = {
 "seq_dim" : 10,
 "batch_size" : 32,
 "split_ratio" : 2/3,
-"num_workers":8,
+"num_workers":4,
 "accumulation_steps": 4,
 "no_of_subset":30 ,
 "subset_overlap_length": 2 ,

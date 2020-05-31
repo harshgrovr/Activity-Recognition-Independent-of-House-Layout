@@ -99,6 +99,7 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
     for train_index, test_index in loo.split(h5Files):
         print('split: ', total_num_iteration_for_LOOCV)
         total_num_iteration_for_LOOCV += 1
+        # Train
 
         # Test
         file_index = test_index[-1]
@@ -107,8 +108,14 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
         dataset = datasetHDF5(objectsChannel,sensorChannel, curr_file_path=file_path)
         testLoader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
 
+        for file_index in train_index:
+            date = datetime.strptime(h5Files[file_index][0], '%d-%b-%Y')
+            file_path = os.path.join(h5Directory, date.strftime('%d-%b-%Y') + '.h5')
 
-        training(config['num_epochs'], testLoader, optimizer, model, criterion, start_epoch, train_index, h5Files, h5Directory, objectsChannel, sensorChannel, train_index)
+            dataset = datasetHDF5(objectsChannel, sensorChannel,curr_file_path = file_path)
+            trainLoader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=True, num_workers=config['num_workers'])
+
+            training(config['num_epochs'], trainLoader,  trainLoader,optimizer, model, criterion, start_epoch)
         print('testing it')
         accuracy, per_class_accuracy = evaluate(testLoader, model)
         break
@@ -126,51 +133,42 @@ def image_from_tensor(image):
     cv2.waitKey(0)
 
 
-def training(num_epochs, testLoader, optimizer, model, criterion, start_epoch,h5Files, h5Directory, objectsChannel, sensorChannel,train_index, accumulation_steps = config['accumulation_steps']):
+def training(num_epochs, trainLoader, testLoader, optimizer, model, criterion, start_epoch, accumulation_steps = config['accumulation_steps']):
     writer = SummaryWriter(os.path.join('../logs', file_name, 'cnn_lstm'))
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     for epoch in range(num_epochs):
         print('epoch', epoch + start_epoch)
         running_loss = 0
-        generalTrainLoader = []
-        for file_index in train_index:
-            date = datetime.strptime(h5Files[file_index][0], '%d-%b-%Y')
-            file_path = os.path.join(h5Directory, date.strftime('%d-%b-%Y') + '.h5')
+        for i, (image, label) in enumerate(trainLoader):
+            batch_size, timesteps, H, W, C = image.size()
+            image = image.view(batch_size * timesteps, H,W,C)
+            image = image.permute(0, 3, 1, 2)  # from NHWC to NCHW
 
-            dataset = datasetHDF5(objectsChannel, sensorChannel, curr_file_path=file_path)
-            trainLoader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False,
-                                     num_workers=config['num_workers'])
-            generalTrainLoader = trainLoader
-            for i, (image, label) in enumerate(trainLoader):
-                batch_size, timesteps, H, W, C = image.size()
-                image = image.view(batch_size * timesteps, H,W,C)
-                image = image.permute(0, 3, 1, 2)  # from NHWC to NCHW
+            if i % 20 == 19:
+                print(i)
+            image = image.float().to(device)
+            label = label.to(device)
 
-                if i % 20 == 19:
-                    print(i)
-                image = image.float().to(device)
-                label = label.to(device)
-
-                # Forward pass to get output/logits
-                output, (hn,cn) = model(image)
-                # Calculate Loss: softmax --> cross entropy loss
-                label = label.view(-1)
-                output = output.view(-1, output.size(2))
-                loss = criterion(output, label)
-                print(loss)
-                running_loss += loss
-                loss = loss / accumulation_steps  # Normalize our loss (if averaged)
-                loss.backward()  # Backward pass
-                if i % accumulation_steps == accumulation_steps - 1:  # Wait for several backward steps
-                    optimizer.step()  # Now we can do an optimizer step
-                    optimizer.zero_grad()  # Reset gradients tensors
+            # Forward pass to get output/logits
+            output, (hn,cn) = model(image)
+            # Calculate Loss: softmax --> cross entropy loss
+            label = label.view(-1)
+            output = output.view(-1, output.size(2))
+            loss = criterion(output, label)
+            print(loss)
+            running_loss += loss
+            loss = loss / accumulation_steps  # Normalize our loss (if averaged)
+            loss.backward()  # Backward pass
+            if (i) % accumulation_steps == accumulation_steps -1 :  # Wait for several backward steps
+                optimizer.step()  # Now we can do an optimizer step
+                optimizer.zero_grad()  # Reset gradients tensors
         print('epoch: {} Loss: {}'.format(epoch, running_loss))
 
-        if epoch % 1 == 0:
+        if epoch % 20 == 0:
             print('test accuracy')
             accuracy, per_class_accuracy = evaluate(testLoader, model)
             print('train accuracy')
-            accuracy, per_class_accuracy = evaluate(generalTrainLoader, model)
+            accuracy, per_class_accuracy = evaluate(trainLoader, model)
 
             # Logging mean class accuracy
             d = {}
