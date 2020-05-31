@@ -232,7 +232,8 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
             # loss = loss + config['decay'] * l1_regularization
             # Calculate Loss: softmax --> cross entropy loss
 
-            loss = criterion(output, label)#weig pram
+            loss = criterion(output, label) #weig pram
+
             running_loss += loss
             loss.backward()  # Backward pass
             optimizer.step()  # Now we can do an optimizer stepx`

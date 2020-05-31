@@ -8,12 +8,12 @@ import os
 import sys
 import datetime
 from datetime import datetime, timedelta
-from src.dataGeneration import generateObjectChannels, generateSensorChannelForTheMinute
+from src.dataGeneration import generateObjectChannels, generateSensorChannelForTheMinute, generateSensorChannel
 from config.config import config
 class Sensor():
   def __init__(self, csv_file_path, json_file_path, root_dir, transform=None):
     df = pd.read_csv(csv_file_path)
-    self.csvFile = df.iloc[:2000, :]
+    self.csvFile = df.iloc[:, :]
     with open(json_file_path) as f:
       d = json.load(f)
     self.jsonFile = d
@@ -23,6 +23,7 @@ class Sensor():
     self.height = config['image_height']
     self.channel = 1
     self.objectChannel = generateObjectChannels(self.jsonFile, self.width, self.height, self.channel)
+    self.sensorChannel = generateSensorChannel(self.jsonFile)
     self.ActivityIdList = [
       {"name": "idle", "id": 0},
       {"name": "leaveHouse", "id": 1},
@@ -60,14 +61,14 @@ class Sensor():
 
     while firstdate <= lastDate:
       print(firstdate)
-      zeros = np.zeros((1, config['resize_height'], config['resize_width'], 4))
+      zeros = np.zeros((1, config['resize_height'], config['resize_width'], 3))
       labels = np.array([], dtype=np.long)
       index = 0
       prev_sensor_values = ''
 
       self.h5Name = os.path.join(self.root_dir, 'h5py', firstdate.strftime('%d-%b-%Y') + '.h5')
       archive = h5py.File(self.h5Name, 'a')
-      archive.create_dataset('/images', data=np.empty((1, config['resize_height'], config['resize_width'], 4)), compression="gzip", chunks=True, maxshape=(None, None, None, None))
+      archive.create_dataset('/images', data=np.empty((1, config['resize_height'], config['resize_width'], 3)), compression="gzip", chunks=True, maxshape=(None, None, None, None))
 
       # Make a single file for each day
       while firstdate == self.getDate(self.csvFile.iloc[idx, 0]):
@@ -79,11 +80,11 @@ class Sensor():
         if prev_sensor_values != new_sensor_values:
           self.image_name = os.path.join(self.root_dir, 'AnnotatedImage', self.csvFile.iloc[idx, 0])
           self.image = cv2.imread(self.image_name + '.png')
-          self.sensorChannel = generateSensorChannelForTheMinute(self.jsonFile, self.csvFile.iloc[idx, 0], self.csvFile, self.width, self.height, self.channel)
-          self.image= self.image/255
-          self.image = np.concatenate((self.image, self.sensorChannel), axis=2)
-          self.image = np.expand_dims(self.image, axis= 0)
+          # self.sensorChannel = generateSensorChannelForTheMinute(self.jsonFile, self.csvFile.iloc[idx, 0], self.csvFile, self.width, self.height, self.channel)
 
+          self.image = self.image / 255
+
+          self.image = np.expand_dims(self.image, axis= 0)
           # get label
           label = self.csvFile.iloc[idx, 2]
           # Get label ID
@@ -110,6 +111,7 @@ class Sensor():
       archive.create_dataset('/length', data=index)
       if flag == 0:
         archive.create_dataset('/object', data=self.objectChannel)
+        archive.create_dataset('/sensor', data=self.sensorChannel)
         flag = 1
       archive.close()
 

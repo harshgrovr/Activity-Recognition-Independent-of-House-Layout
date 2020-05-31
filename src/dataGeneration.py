@@ -342,6 +342,8 @@ def generateImagewithAllAnnoations(input_dir, file_name):
             cv2.imwrite(os.path.join(input_dir, 'AnnoattedImage.png'), image)
 
 
+
+
 def sortDictionary(file, key):
     with open(file) as f:
         d = json.load(f)
@@ -395,54 +397,47 @@ def generateBaseImage(input_dir, file_name, width1 = 0, height1 = 0):
                 # cv2.putText(image, name, (int(center_x), int(center_y)), font, 0.4, (255, 0, 0), 1)
     cv2.imwrite(os.path.join(input_dir, 'houseB.png'), image)
 
+def generateSensorChannel(jsonFile, width = config['image_width'], height = config['image_height'],channel = 1):
+    # Generate sensors Channel. A single channel for each unique sensor
+    outputChannel = []
+    sensorChannelDict = {}
+    d = jsonFile
+    sensorChannel = np.zeros((height, width, channel), dtype=int)
+    for sensor in d['sensorLocation']:
+        x1, y1, x2, y2 = sensor['location']
+        sensorChannel[y1:y2, x1:x2, :] = 1
+
+    sensorChannel = sensorChannel.astype('uint8')
+    sensorChannel = cv2.resize(sensorChannel, (config['resize_width'], config['resize_height']),
+                               interpolation=cv2.INTER_AREA)
+    sensorChannel = sensorChannel.reshape((config['resize_width'], config['resize_height'], 1))
+
+    # cv2.imwrite("sensorChannel.jpg", sensorChannel * 255)
+
+    return sensorChannel
+
 def generateObjectChannels(jsonFile, width = config['image_width'], height = config['image_height'],channel = 1):
+
     # Generate Objects Channel. A single channel for each unique object
     outputChannel = []
     objectChannelDict = {}
-    d= jsonFile
+    d = jsonFile
+    objectChannel = np.zeros((height, width, channel), dtype=int)
     for object in d['baseImage']:
-        objectChannel = np.zeros((height, width, channel), dtype=int)
         if object['name'] == 'angleWall':
             continue
         x1, y1, x2, y2 = object['location']
-        if object['name'] in objectChannelDict.keys():
-            objectChannelDict[object['name']][x1:y2, y1:y2, :] = 1
-        else:
-            objectChannel[y1:y2, x1:x2, :] = 1
-            objectChannelDict[object['name']] = objectChannel
+        objectChannel[y1:y2, x1:x2, :] = object['id']
+
+    objectChannel = objectChannel.astype('uint8')
+    objectChannel = cv2.resize(objectChannel, (config['resize_width'], config['resize_height']), interpolation=cv2.INTER_AREA)
+    objectChannel = objectChannel.reshape((config['resize_width'], config['resize_height'], 1))
+
+    # cv2.imwrite("objectChannel.jpg", objectChannel * 255)
+
+    return objectChannel
 
 
-    for k in objectChannelDict:
-
-        objectChannelDict[k] =  objectChannelDict[k].astype('uint8')
-        objectChannelDict[k] = cv2.resize(objectChannelDict[k], (config['resize_width'], config['resize_height']), interpolation=cv2.INTER_AREA)
-        objectChannelDict[k] = objectChannelDict[k].reshape((config['resize_width'], config['resize_height'], 1))
-
-        outputChannel.append(objectChannelDict[k])
-
-    outputChannel = np.concatenate(outputChannel, axis=2)
-
-
-    return outputChannel
-
-
-def generateObjectChannelsImage(jsonFile, width = config['image_width'], height = config['image_height'],channel = 1):
-    # Generate Objects Channel. A single channel for each unique object
-    outputChannel = []
-    objectChannelDict = {}
-    d= jsonFile
-    objectChannel = np.zeros((height, width, channel), dtype=int)
-    for object in d['baseImage']:
-        # if object['name'] == 'angleWall':
-        #     continue
-        x1, y1, x2, y2 = object['location']
-        if object['name'] in objectChannelDict.keys():
-            objectChannelDict[object['name']][y1:y2, x1:x2, :] = 1
-        else:
-            objectChannel[y1:y2, x1:x2, :] = 1
-            cv2.imwrite("color_img.jpg", objectChannel * 255)
-    objectChannel = cv2.resize(objectChannel, (config['resize_width'],config['resize_height']), interpolation=cv2.INTER_AREA)
-    cv2.imwrite("color_img.jpg", objectChannel * 255)
 
 def generateSensorChannelForTheMinute(jsonFile, minute='24-Jul-2009 16:46:00', csvFile = '', width = config['image_width'], height = config['image_height'], channel = 1):
     # Generate Objects Channel. A single channel for each unique object
@@ -478,21 +473,19 @@ if __name__ == "__main__":
         # generateBaseImage(input_dir, file_name, width1=908, height1= 740)
 
         # # Generate an Image named Annoation.png , showing all the sensors and objects
-        generateImagewithAllAnnoations(input_dir, file_name)
+        # generateImagewithAllAnnoations(input_dir, file_name)
 
 
         # # Make a folder and save all the annotated Image per minute bases
-        # annotateImage(file_name,input_dir, minutesToGenrate = 2000)
+        annotateImage(file_name,input_dir, minutesToGenrate = csv_length)
 
         # # Generate a video on above generated Image
         # makeVideo(os.path.join(input_dir, 'AnnotatedImage'), fps=10)
 
-        # Generate H5 file for the images per day basic
+        # # Generate H5 file for the images per day basic
         dataset = Sensor(csv_file_path,json_file_path , root_dir=input_dir,
                          transform=None)
         dataset.generateOffline()
-
-
 
 
 

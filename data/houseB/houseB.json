@@ -115179,7 +115179,6 @@
       "id": 24,
       "angle": 0
     },
-    { "name": "Bed", "location": [32, 57, 220, 224], "id": -1, "angle": 0 },
     { "name": "Frontdoor", "location": [282, 528, 323, 534],"id": 7, "angle": 0 }
   ],
 
@@ -115187,82 +115186,82 @@
     {
       "name": "BedRoom",
       "location": [19, 19, 386, 260],
-      "id": 1,
+      "id": 19,
       "angle": 0
     },
     {
       "name": "Wall",
       "location": [19, 19, 18, 720],
-      "id": 1,
+      "id": 2,
       "angle": 0
     },
     {
       "name": "BedRoomDoor",
       "location": [392, 116, 403, 195],
-      "id": 2,
+      "id": 3,
       "angle": 0
     },
     {
       "name": "BedRoomDresser",
       "location": [276, 21, 368, 58],
-      "id": 3,
+      "id": 4,
       "angle": 0
     },
-    { "name": "Bed", "location": [32, 57, 220, 224], "id": 4, "angle": 0 },
+    { "name": "Bed", "location": [32, 57, 220, 224], "id": 5, "angle": 0 },
     {
       "name": "Chair",
       "location": [539, 93, 618, 184],
-      "id": 5,
+      "id": 6,
       "angle": 30
     },
     {
       "name": "Table",
       "location": [636,154,736,257],
-      "id": 1,
+      "id": 7,
       "angle": 0
     },
     {
       "name": "Chair",
       "location": [729,282,802, 257],
-      "id": 1,
+      "id": 6,
       "angle": 120
     },
     {
       "name": "Chair",
       "location": [535,356, 576,388],
-      "id": 1,
+      "id": 6,
       "angle": 0
     },
     {
       "name": "piano",
       "location": [491, 388, 628, 428],
-      "id": 1,
+      "id": 8,
       "angle": 0
     },
     {
       "name": "Study Table",
       "location": [800, 476, 881, 626],
-      "id": 1,
+      "id": 9,
       "angle": 0
     },
     {
       "name": "Table",
       "location": [691, 669, 821, 709],
-      "id": 1,
+      "id": 7,
       "angle": 0
     },
     
     {
       "name": "Wall1",
       "location": [687, 710, 687, 429],
-      "id": 1,
+      "id": 2,
       "angle": 0
     },
   
     {
       "name": "Wall2",
       "location": [424, 428, 687, 428],
-      "id": 1,
+      "id": 2,
       "angle": 0
     },
     {
@@ -115276,25 +115275,25 @@
     {
       "name": "Wall3",
       "location": [19, 19, 884, 19],
-      "id": 1,
+      "id": 2,
       "angle": 0
     },
     {
       "name": "Wall4",
       "location": [884, 21, 884, 709],
-      "id": 1,
+      "id": 2,
       "angle": 0
     },
     {
       "name": "Wall5",
       "location": [884, 709, 687, 709],
-      "id": 1,
+      "id": 2,
       "angle": 0
     },
     {
       "name": "Wall6",
       "location": [18, 720, 236, 720],
-      "id": 1,
+      "id": 2,
       "angle": 0
     },
    
@@ -115309,55 +115308,55 @@
     {
       "name": "Toilet",
       "location": [22, 618, 236, 720],
-      "id": 1,
+      "id": 10,
       "angle": 0
     },
     {
       "name": "ToiletSink",
       "location": [19,629,100,708],
-      "id": 1,
+      "id": 11,
       "angle": 0
     },
     {
       "name": "ToiletSeat",
       "location": [171,719,208,668],
-      "id": 1,
+      "id": 12,
       "angle": 0
     },
     {
       "name": "ToiletDoor",
       "location": [136,602,217,618],
-      "id": 1,
+      "id": 13,
       "angle": 0
     },
     {
       "name": "Dining Table",
       "location": [21,409,152,556],
-      "id": 1,
+      "id": 14,
       "angle": 0
     },
     {
       "name": "Stove",
       "location": [24,284,95,352],
-      "id": 1,
+      "id": 15,
       "angle": 0
     },
     {
       "name": "Microwave",
       "location": [100,288,148,332],
-      "id": 1,
+      "id": 16,
       "angle": 0
     },
     {
       "name": "KitchenSink",
       "location": [174,290,247,349],
-      "id": 1,
+      "id": 17,
       "angle": 0
     },
     {
       "name": "Fridge",
       "location": [323,283,400,363],
-      "id": 1,
+      "id": 18,
       "angle": 0
     }
 

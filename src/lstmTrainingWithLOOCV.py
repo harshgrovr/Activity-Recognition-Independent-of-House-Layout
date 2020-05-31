@@ -189,6 +189,7 @@ def train(csv_file, ActivityIdList):
         else:
             trainDataFrame = df[end + 1:]
 
+
         # get Weighted Loss
         criterion = getWeightedLoss(trainDataFrame)
 
@@ -203,6 +204,8 @@ def train(csv_file, ActivityIdList):
             testLoader = DataLoader(trainDataset, batch_size=config['batch_size'], shuffle=False,
                                      num_workers=config['num_workers'],
                                      drop_last=True)
+            print('length of test dataframe:  ', len(testDataFrame))
+            print('length of train dataframe: ', len(trainDataFrame))
 
         # Make Train DataLoader
         trainDataset = datasetCSV(trainDataseq, config['seq_dim'])
@@ -210,12 +213,14 @@ def train(csv_file, ActivityIdList):
                                  num_workers=config['num_workers'],
                                  drop_last=True)
 
+
         training(config['num_epochs'], trainLoader, optimizer, model, criterion, config['seq_dim'],
                  config['input_dim'], config['batch_size'],
                  df, None, start_epoch, file_name)
 
         # Generate Test DataLoader
         if start - config['seq_dim'] > 0:
+            print('Testing')
             acc, _, _, f1, matrix = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
                  config['batch_size'], criterion)
             score += f1
@@ -288,7 +293,7 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
             optimizer.zero_grad()  # Reset gradients tensors
 
         # if epoch % 10 == 0:
-            # accuracy, per_class_accuracy, trainLoss, f1, _ = evaluate(trainLoader, model, config['seq_dim'], config['input_dim'], config['batch_size'], criterion)
+        #     accuracy, per_class_accuracy, trainLoss, f1, _ = evaluate(trainLoader, model, config['seq_dim'], config['input_dim'], config['batch_size'], criterion)
             # writer.add_scalar('train' + 'Accuracy', accuracy, epoch + start_epoch + 1)
             # log_mean_class_accuracy(writer, per_class_accuracy, epoch + 1, datasettype='train')
             # Loggin trainloss

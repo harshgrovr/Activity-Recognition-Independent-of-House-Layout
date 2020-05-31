@@ -4,6 +4,9 @@ import torch.nn as nn
 from torch.autograd import Variable
 import numpy as np
 from Better_LSTM_PyTorch.better_lstm import LSTM
+from config.config import config
+
+
 class CNNModel(nn.Module):
     def __init__(self):
         super(CNNModel, self).__init__()
@@ -106,13 +109,14 @@ class HARmodel(nn.Module):
         return out
 
 
-class Net(nn.Module):
+class CNNLSTM(nn.Module):
     def __init__(self, num_classes):
-        super(Net, self).__init__()
+        super(CNNLSTM, self).__init__()
+        self.model = None
 
         self.cnn_layers = nn.Sequential(
             # Defining a 2D convolution layer
-            nn.Conv2d(4, 16, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(5, 16, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(16),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
@@ -123,18 +127,17 @@ class Net(nn.Module):
             nn.MaxPool2d(kernel_size=2, stride=2),
         )
 
-        self.fc1 = nn.Sequential(
-            nn.Linear(in_features=100352, out_features=500),
-            nn.ReLU()
-        )
-        self.fc2 = nn.Sequential(
-            nn.Linear(in_features=500, out_features=num_classes)
-        )
 
-    # Defining the forward pass
+    # Defining the forward pass NCHW
     def forward(self, x):
+        batch_size, C, H, W = x.size()
+        batch_size = int(batch_size/config['seq_dim'])
         x = self.cnn_layers(x)
-        x = x.view(x.size(0), -1)
-        out = self.fc1(x)
-        out = self.fc2(out)
-        return out
+        x = x.view(batch_size, config['seq_dim'], -1)
+        lstm_input_size = x.size(2)
+        if self.model is None:
+            print('model initialized')
+            self.model = LSTM(lstm_input_size, config['hidden_dim'])
+
+        output, (hn, cn) = self.model(x)
+        return output, (hn, cn)
