@@ -13,7 +13,7 @@ from config.config import config
 class Sensor():
   def __init__(self, csv_file_path, json_file_path, root_dir, transform=None):
     df = pd.read_csv(csv_file_path)
-    self.csvFile = df.iloc[:, :]
+    self.csvFile = df.iloc[:1000, :]
     with open(json_file_path) as f:
       d = json.load(f)
     self.jsonFile = d

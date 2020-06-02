@@ -5,6 +5,9 @@ import h5py
 import numpy as np
 import pandas as pd
 from config.config import config
+
+
+
 class datasetHDF5(Dataset):
     def __init__(self,objectChannel,sensorChannel, curr_file_path, ):
         super(datasetHDF5, self).__init__()
@@ -19,13 +22,29 @@ class datasetHDF5(Dataset):
         self.objectChannel= objectChannel
         self.sensorChannel = sensorChannel
 
+
     def __getitem__(self, idx):
         with h5py.File(self.h5_path, 'r') as f:
             self.h5File = f
             input = self.h5File['images'][idx : idx + config['seq_dim'], :, :, :]
             label = self.h5File['labels'][idx: idx + config['seq_dim']]
+
+
+
             input = np.concatenate((input, self.objectChannel), axis=3)
             input = np.concatenate((input, self.sensorChannel), axis=3)
+
+            # image = input
+            # image = image[0]
+            # print(image.shape)
+            # print(np.unique(image[:, :, [0, 1, 2]]))
+            # cv2.imshow('img', 255 * image[:, :, [0, 1, 2]])
+            # cv2.waitKey(0)
+            # cv2.imshow('img', 255 * image[:, :, 3])
+            # cv2.waitKey(0)
+            # cv2.imshow('img', 255 * image[:, :, 4])
+            # cv2.waitKey(0)
+
             # input = torch.as_tensor(np.array(input).astype('float'))
             # label = torch.as_tensor(np.array(label).astype('long'))
 

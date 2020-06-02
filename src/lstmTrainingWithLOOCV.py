@@ -15,7 +15,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from src.network import LSTM
 import numpy as np
-import seaborn as sn
+#import seaborn as sn
 import pandas as pd
 from sklearn.metrics import confusion_matrix
 import matplotlib.pyplot as plt
@@ -195,13 +195,15 @@ def train(csv_file, ActivityIdList):
 
         # generate train sequence list based upon above dataframe.
         trainDataseq = create_inout_sequences(trainDataFrame, config['seq_dim'])
-        testLoader = []
+        # testLoader = []
         # Make Test DataLoader
+        flag =0
         if start - config['seq_dim'] > 0:
+            flag =1
             testDataFrame = df[start - config['seq_dim']: end]
             testDataSeq = create_inout_sequences(testDataFrame, config['seq_dim'])
-            trainDataset = datasetCSV(testDataSeq, config['seq_dim'])
-            testLoader = DataLoader(trainDataset, batch_size=config['batch_size'], shuffle=False,
+            testDataset = datasetCSV(testDataSeq, config['seq_dim'])
+            testLoader = DataLoader(testDataset, batch_size=config['batch_size'], shuffle=False,
                                      num_workers=config['num_workers'],
                                      drop_last=True)
             print('length of test dataframe:  ', len(testDataFrame))
@@ -216,13 +218,15 @@ def train(csv_file, ActivityIdList):
 
         training(config['num_epochs'], trainLoader, optimizer, model, criterion, config['seq_dim'],
                  config['input_dim'], config['batch_size'],
-                 df, None, start_epoch, file_name)
+                 df, None, start_epoch, file_name, flag)
 
         # Generate Test DataLoader
         if start - config['seq_dim'] > 0:
             print('Testing')
-            acc, _, _, f1, matrix = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
+            acc, _, loss, f1, matrix = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
                  config['batch_size'], criterion)
+            print('testing accuracy', acc)
+            print('testing loss', loss)
             score += f1
             confusion_matrix += matrix
             accuracy += acc
@@ -236,9 +240,9 @@ def train(csv_file, ActivityIdList):
 
     df_cm = pd.DataFrame(confusion_matrix, index=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])],
                          columns=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])], dtype=float)
-    plt.figure(figsize=(20, 20))
-    sn.heatmap(df_cm, annot=True)
-    plt.show()
+    # plt.figure(figsize=(20, 20))
+    # sn.heatmap(df_cm, annot=True)
+    # plt.show()
 
 
 def log_mean_class_accuracy(writer, per_class_accuracy, epoch, datasettype):
@@ -252,7 +256,7 @@ def log_mean_class_accuracy(writer, per_class_accuracy, epoch, datasettype):
 
 
 # Train the Network
-def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, input_dim, batch_size, df, testLoader, start_epoch, file_name):
+def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, input_dim, batch_size, df, testLoader, start_epoch, file_name, flag):
 
     # for each random run select the random point and minute to run for
     # do this for each random point
@@ -293,32 +297,37 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
             optimizer.zero_grad()  # Reset gradients tensors
 
         # if epoch % 10 == 0:
-        #     accuracy, per_class_accuracy, trainLoss, f1, _ = evaluate(trainLoader, model, config['seq_dim'], config['input_dim'], config['batch_size'], criterion)
-            # writer.add_scalar('train' + 'Accuracy', accuracy, epoch + start_epoch + 1)
-            # log_mean_class_accuracy(writer, per_class_accuracy, epoch + 1, datasettype='train')
-            # Loggin trainloss
-            # writer.add_scalar('train Loss', trainLoss, epoch + start_epoch+ 1)
-            # writer.add_scalar('train f1', f1, epoch + start_epoch + 1)
-
-            # accuracy, per_class_accuracy, testLoss, f1 = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
-            #      config['batch_size'], criterion)
-            # writer.add_scalar('test' + 'Accuracy', accuracy, epoch + start_epoch+ 1)
-            # log_mean_class_accuracy(writer, per_class_accuracy, epoch + start_epoch + 1, datasettype='test')
-            # # Loggin test loss
-            # writer.add_scalar('test Loss', testLoss, epoch + start_epoch+ 1)
-            #
-            # writer.add_scalar('test f1', f1, epoch + start_epoch + 1)
-            #
-            # save_checkpoint({
-            #     'epoch': epoch + 1,
-            #     'state_dict': model.state_dict(),
-            #     'optimizer': optimizer.state_dict(),
-            # }, True)
-
-            # for tag, value in model.named_parameters():
-            #     tag = tag.replace('.', '/')
-            #     # print(value.grad.data.cpu().numpy())
-            #     writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + start_epoch+ 1)
+        #     # accuracy, per_class_accuracy, trainLoss, f1, _ = evaluate(trainLoader, model, config['seq_dim'], config['input_dim'], config['batch_size'], criterion)
+        #     # print('train loss is:',trainLoss)
+        #     # writer.add_scalar('train' + 'Accuracy', accuracy, epoch + start_epoch + 1)
+        #     # log_mean_class_accuracy(writer, per_class_accuracy, epoch + 1, datasettype='train')
+        #     # Loggin trainloss
+        #     # writer.add_scalar('train Loss', trainLoss, epoch + start_epoch+ 1)
+        #     # writer.add_scalar('train f1', f1, epoch + start_epoch + 1)
+        #
+        #     if flag != 0:
+        #         accuracy, per_class_accuracy, testLoss, f1,_ = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
+        #          config['batch_size'], criterion)
+        #
+        #         print('Test loss is:', testLoss)
+        #
+        #     # writer.add_scalar('test' + 'Accuracy', accuracy, epoch + start_epoch+ 1)
+        #     # log_mean_class_accuracy(writer, per_class_accuracy, epoch + start_epoch + 1, datasettype='test')
+        #     # # Loggin test loss
+        #     # writer.add_scalar('test Loss', testLoss, epoch + start_epoch+ 1)
+        #     #
+        #     # writer.add_scalar('test f1', f1, epoch + start_epoch + 1)
+        #     #
+        #     # save_checkpoint({
+        #     #     'epoch': epoch + 1,
+        #     #     'state_dict': model.state_dict(),
+        #     #     'optimizer': optimizer.state_dict(),
+        #     # }, True)
+        #
+        #     # for tag, value in model.named_parameters():
+        #     #     tag = tag.replace('.', '/')
+        #     #     # print(value.grad.data.cpu().numpy())
+        #     #     writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + start_epoch+ 1)
 
 
         print('%d loss: %.3f' %
@@ -330,7 +339,7 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
 def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
     # Initialize the prediction and label lists(tensors)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
+    running_loss = 0
     nb_classes = config['output_dim']
     confusion_matrix = torch.zeros(nb_classes, nb_classes)
     correct = 0
@@ -354,10 +363,10 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
             labels = labels.view(-1, labels.size(2)).squeeze()
 
             loss = criterion(output, labels)  # weig pram
-
+            running_loss += loss
             # Get predictions from the maximum value
             _, predicted = torch.max(output, 1)
-            f1 += f1_score(labels, predicted,average='weighted')
+            f1 += f1_score(labels.cpu(), predicted.cpu(),average='weighted')
             # Total number of labels
             total += labels.size(0)
             # Total correct predictions
@@ -371,19 +380,19 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
                 # print(correct)
             for t, p in zip(labels.view(-1), predicted.view(-1)):
                 confusion_matrix[t.long(), p.long()] += 1
-    print('F1 SCORE',f1)
+    # print('F1 SCORE',f1)
 
-    print('per class accuracy')
+    # print('per class accuracy')
     per_class_acc = confusion_matrix.diag() / confusion_matrix.sum(1)
     per_class_acc = per_class_acc.cpu().numpy()
     per_class_acc[np.isnan(per_class_acc)] = -1
-    print(confusion_matrix.diag())
-    print(confusion_matrix.sum(1))
+    # print(confusion_matrix.diag())
+    # print(confusion_matrix.sum(1))
     d ={}
     for i, entry in enumerate(per_class_acc):
         if entry != -1:
             d[getClassnameFromID(i)] = entry
-    print(d)
+    # print(d)
     pd.isnull(np.array([np.nan, -1], dtype=float))
 
     df_cm = pd.DataFrame(confusion_matrix, index=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])],
@@ -395,8 +404,8 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
     accuracy = 100 * correct / total
 
     # Print Accuracy
-    print('Accuracy: {}'.format(accuracy))
-    return accuracy, per_class_acc, 0, f1, confusion_matrix
+    # print('Accuracy: {}'.format(accuracy))
+    return accuracy, per_class_acc, running_loss, f1, confusion_matrix
 
 if __name__ == "__main__":
     if sys.argv[1] != None:

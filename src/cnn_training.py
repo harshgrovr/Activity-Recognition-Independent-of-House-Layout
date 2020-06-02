@@ -17,7 +17,7 @@ from datetime import datetime
 import cv2
 
 from src.lstmTraining import getIDFromClassName, getClassnameFromID
-from src.network import CNNModel, CNNLSTM
+from src.network import CNNModel, CNNLSTM, LSTMModel
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -37,7 +37,7 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
     total_acc_for_LOOCV = 0
 
     # Defining Model, Optimizer and Loss
-    model = CNNLSTM(config['output_dim']).to(device)
+    model = LSTMModel().to(device)
 
     print('cuda available: ', torch.cuda.is_available())
 
@@ -105,18 +105,26 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
         date = datetime.strptime(h5Files[file_index][0], '%d-%b-%Y')
         file_path = os.path.join(h5Directory, date.strftime('%d-%b-%Y') + '.h5')
         dataset = datasetHDF5(objectsChannel,sensorChannel, curr_file_path=file_path)
-        testLoader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
+        testLoader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'], drop_last=True)
 
+        for file_index in train_index:
+            date = datetime.strptime(h5Files[file_index][0], '%d-%b-%Y')
+            file_path = os.path.join(h5Directory, date.strftime('%d-%b-%Y') + '.h5')
 
-        training(config['num_epochs'], testLoader, optimizer, model, criterion, start_epoch, train_index, h5Files, h5Directory, objectsChannel, sensorChannel, train_index)
+            dataset = datasetHDF5(objectsChannel, sensorChannel, curr_file_path=file_path)
+            trainLoader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False,
+                                     num_workers=config['num_workers'], drop_last=True)
+
+            training(config['num_epochs'], testLoader, optimizer, model, criterion, start_epoch, trainLoader)
+
         print('testing it')
-        accuracy, per_class_accuracy = evaluate(testLoader, model)
-        break
-
+        accuracy, per_class_accuracy, f1 = evaluate(testLoader, model)
+        print(accuracy, per_class_accuracy, f1)
+    print("Avg. Accuracy is {}".format(total_acc_for_LOOCV))
     print("Avg. Accuracy is {}".format(total_acc_for_LOOCV))
 def image_from_tensor(image):
     image = image[0].numpy()
-    print(image.shape)
+    image = image[0]
     print(np.unique(image[:, :, [0,1,2]]))
     cv2.imshow('img', image[:, :, [0,1,2]])
     cv2.waitKey(0)
@@ -126,52 +134,53 @@ def image_from_tensor(image):
     cv2.waitKey(0)
 
 
-def training(num_epochs, testLoader, optimizer, model, criterion, start_epoch,h5Files, h5Directory, objectsChannel, sensorChannel,train_index, accumulation_steps = config['accumulation_steps']):
+def training(num_epochs, testLoader, optimizer, model, criterion, start_epoch, trainLoader, accumulation_steps = config['accumulation_steps']):
     writer = SummaryWriter(os.path.join('../logs', file_name, 'cnn_lstm'))
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
     for epoch in range(num_epochs):
         print('epoch', epoch + start_epoch)
         running_loss = 0
-        generalTrainLoader = []
-        for file_index in train_index:
-            date = datetime.strptime(h5Files[file_index][0], '%d-%b-%Y')
-            file_path = os.path.join(h5Directory, date.strftime('%d-%b-%Y') + '.h5')
 
-            dataset = datasetHDF5(objectsChannel, sensorChannel, curr_file_path=file_path)
-            trainLoader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False,
-                                     num_workers=config['num_workers'])
-            generalTrainLoader = trainLoader
-            for i, (image, label) in enumerate(trainLoader):
-                batch_size, timesteps, H, W, C = image.size()
-                image = image.view(batch_size * timesteps, H,W,C)
-                image = image.permute(0, 3, 1, 2)  # from NHWC to NCHW
+        hn,cn = model.init_hidden(config['batch_size'])
+        for i, (image, label) in enumerate(trainLoader):
+            hn.detach_()
+            cn.detach_()
+            batch_size, timesteps, H, W, C = image.size()
+            image = image.view(batch_size * timesteps, H,W,C)
+            image = image.permute(0, 3, 1, 2)  # from NHWC to NCHW
 
-                if i % 20 == 19:
-                    print(i)
-                image = image.float().to(device)
-                label = label.to(device)
+            if i % 10 == 9:
+                print(i)
 
-                # Forward pass to get output/logits
-                output, (hn,cn) = model(image)
-                # Calculate Loss: softmax --> cross entropy loss
-                label = label.view(-1)
-                output = output.view(-1, output.size(2))
-                loss = criterion(output, label)
-                print(loss)
-                running_loss += loss
-                loss = loss / accumulation_steps  # Normalize our loss (if averaged)
-                loss.backward()  # Backward pass
-                if i % accumulation_steps == accumulation_steps - 1:  # Wait for several backward steps
-                    optimizer.step()  # Now we can do an optimizer step
-                    optimizer.zero_grad()  # Reset gradients tensors
+            image = image.float().to(device)
+            label = label.to(device)
+
+            # Forward pass to get output/ logits
+            output, (hn,cn) = model(image, hn,cn)
+            # Calculate Loss: softmax --> cross entropy loss
+            label = label.view(-1)
+            output = output.view(-1, output.size(2))
+            loss = criterion(output, label)
+            # print(loss)
+            running_loss += loss
+            loss = loss / accumulation_steps  # Normalize our loss (if averaged)
+            loss.backward()  # Backward pass
+            if i % accumulation_steps == accumulation_steps - 1:  # Wait for several backward steps
+                optimizer.step()  # Now we can do an optimizer step
+                optimizer.zero_grad()  # Reset gradients tensors
         print('epoch: {} Loss: {}'.format(epoch, running_loss))
 
-        if epoch % 1 == 0:
-            print('test accuracy')
-            accuracy, per_class_accuracy = evaluate(testLoader, model)
-            print('train accuracy')
-            accuracy, per_class_accuracy = evaluate(generalTrainLoader, model)
+        if epoch % 20 == 19:
+            accuracy, per_class_accuracy,f1 = evaluate(testLoader, model)
+            print('train accuracy', accuracy)
+            print('per class accuracy', per_class_accuracy)
+            print('F1 score', f1)
 
+            accuracy, per_class_accuracy, f1 = evaluate(trainLoader, model)
+            print('test accuracy', accuracy)
+            print('per class accuracy', per_class_accuracy)
+            print('F1 score', f1)
             # Logging mean class accuracy
             d = {}
             for i in range(len(per_class_accuracy)):
@@ -185,10 +194,10 @@ def training(num_epochs, testLoader, optimizer, model, criterion, start_epoch,h5
                 'optimizer': optimizer.state_dict(),
             }, True)
 
-            # Logging Gradients
-            for tag, value in model.named_parameters():
-                tag = tag.replace('.', '/')
-                writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + 1)
+            # # Logging Gradients
+            # for tag, value in model.named_parameters():
+            #     tag = tag.replace('.', '/')
+            #     writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + 1)
 
             # # plot weights historgram
             # for key in model.linear_layers.state_dict():
@@ -211,37 +220,37 @@ def evaluate(testLoader, model):
     # Iterate through test dataset
     # Iterate through test dataset
     with torch.no_grad():
-        for i,(images, labels) in enumerate(testLoader):
+        hn, cn = model.init_hidden(config['batch_size'])
+        for i, (images, labels) in enumerate(testLoader):
+            hn.detach_()
+            cn.detach_()
             batch_size, timesteps, H, W, C = images.size()
             images = images.view(batch_size * timesteps, H, W, C)
             images = images.permute(0, 3, 1, 2)  # from NHWC to NCHW
 
             # Load images to a Torch Variable
-            if torch.cuda.is_available():
-                images = images.float().cuda()
-            else:
-                images = images.float()
+
+            images = images.float().to(device)
 
             # Forward pass to get output/logits
-            outputs, (hn, cn) = model(images)
+            outputs, (hn, cn) = model(images, hn, cn)
             labels = labels.view(-1)
             outputs = outputs.view(-1, outputs.size(2))
-
 
             # Get predictions from the maximum value
             _, predicted = torch.max(outputs.data, 1)
 
-            f1 += f1_score(labels, predicted, average='weighted')
+            f1 += f1_score(labels.cpu(), predicted.cpu(), average='weighted')
             batches = i
-            print('batchtes: ',batches)
+            print('batche: ',batches)
             # Total number of labels
             total += labels.size(0)
             # Total correct predictions
             correct += (predicted.to(device) == labels.to(device)).sum()
             for t, p in zip(labels.view(-1), predicted.view(-1)):
                 confusion_matrix[t.long(), p.long()] += 1
-
-    print('f1 score: ',f1/batches)
+    f1 = f1/batches
+    print('f1 score: ',f1)
     print('per class accuracy')
     per_class_acc = confusion_matrix.diag() / confusion_matrix.sum(1)
     per_class_acc = per_class_acc.cpu().numpy()
@@ -266,7 +275,7 @@ def evaluate(testLoader, model):
 
     # Print Accuracy
     print('Accuracy: {}'.format(accuracy))
-    return accuracy, per_class_acc
+    return accuracy, per_class_acc, f1
 
 if __name__ == "__main__":
     if sys.argv[1] != None:

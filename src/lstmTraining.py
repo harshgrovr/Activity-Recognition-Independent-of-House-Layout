@@ -16,7 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from src.network import LSTM
 import numpy as np
-import seaborn as sn
+#import seaborn as sn
 import pandas as pd
 from sklearn.metrics import confusion_matrix
 import matplotlib.pyplot as plt
@@ -240,6 +240,7 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
             optimizer.zero_grad()  # Reset gradients tensors
 
         if epoch % 10 == 0:
+            print('training check')
             accuracy, per_class_accuracy, trainLoss, f1 = evaluate(trainLoader, model, config['seq_dim'], config['input_dim'], config['batch_size'], criterion)
             writer.add_scalar('train' + 'Accuracy', accuracy, epoch + start_epoch + 1)
             log_mean_class_accuracy(writer, per_class_accuracy, epoch + 1, datasettype='train')
@@ -247,6 +248,7 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
             writer.add_scalar('train Loss', trainLoss, epoch + start_epoch+ 1)
             writer.add_scalar('train f1', f1, epoch + start_epoch + 1)
 
+            print('Testing check')
             accuracy, per_class_accuracy, testLoss, f1 = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
                  config['batch_size'], criterion)
             writer.add_scalar('test' + 'Accuracy', accuracy, epoch + start_epoch+ 1)
@@ -287,10 +289,12 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
     confusion_matrix = torch.zeros(nb_classes, nb_classes)
     correct = 0
     total = 0
+    batch_num = 1
     # Iterate through test dataset
     with torch.no_grad():
         f1 = 0
-        for input, labels in testLoader:
+        for i,(input, labels) in enumerate(testLoader):
+            batch_num = i
             input = input.view(-1, seq_dim, input_dim)
             # Load images to a Torch Variable
             if torch.cuda.is_available():
@@ -309,7 +313,7 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
 
             # Get predictions from the maximum value
             _, predicted = torch.max(output, 1)
-            f1 += f1_score(labels, predicted,average='weighted')
+            f1 += f1_score(labels.cpu(), predicted.cpu(),average='weighted')
             # Total number of labels
             total += labels.size(0)
             # Total correct predictions
@@ -323,7 +327,7 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
                 # print(correct)
             for t, p in zip(labels.view(-1), predicted.view(-1)):
                 confusion_matrix[t.long(), p.long()] += 1
-    print(f1)
+    print(f1/batch_num)
 
     print('per class accuracy')
     per_class_acc = confusion_matrix.diag() / confusion_matrix.sum(1)
