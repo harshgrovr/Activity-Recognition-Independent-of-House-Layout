@@ -99,6 +99,7 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
     for train_index, test_index in loo.split(h5Files):
         print('split: ', total_num_iteration_for_LOOCV)
         total_num_iteration_for_LOOCV += 1
+        # Train
 
         # Test
         file_index = test_index[-1]
@@ -116,6 +117,7 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
                                      num_workers=config['num_workers'], drop_last=True)
 
             training(config['num_epochs'], testLoader, optimizer, model, criterion, start_epoch, trainLoader)
+
 
         print('testing it')
         accuracy, per_class_accuracy, f1 = evaluate(testLoader, model)
@@ -135,6 +137,7 @@ def image_from_tensor(image):
 
 
 def training(num_epochs, testLoader, optimizer, model, criterion, start_epoch, trainLoader, accumulation_steps = config['accumulation_steps']):
+
     writer = SummaryWriter(os.path.join('../logs', file_name, 'cnn_lstm'))
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -158,10 +161,12 @@ def training(num_epochs, testLoader, optimizer, model, criterion, start_epoch, t
 
             # Forward pass to get output/ logits
             output, (hn,cn) = model(image, hn,cn)
+
             # Calculate Loss: softmax --> cross entropy loss
             label = label.view(-1)
             output = output.view(-1, output.size(2))
             loss = criterion(output, label)
+
             # print(loss)
             running_loss += loss
             loss = loss / accumulation_steps  # Normalize our loss (if averaged)
@@ -176,6 +181,7 @@ def training(num_epochs, testLoader, optimizer, model, criterion, start_epoch, t
             print('train accuracy', accuracy)
             print('per class accuracy', per_class_accuracy)
             print('F1 score', f1)
+
 
             accuracy, per_class_accuracy, f1 = evaluate(trainLoader, model)
             print('test accuracy', accuracy)

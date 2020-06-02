@@ -84,7 +84,7 @@ class LSTM(nn.LSTM):
         # print('input shape is: ', input.shape)
         out, (hn,cn) = super().forward(input, hx=hx)
         out = self.output_drop(out)
-        out = self.fc(out[:, :, :])
+        out = self.fc(out[:, -1, :])
         # print('seq shape is: ', seq.shape)
         # print('state shape is: ',hn.shape)
         return out, (hn,cn)
