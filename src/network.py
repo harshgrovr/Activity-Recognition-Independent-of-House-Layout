@@ -49,7 +49,7 @@ class LSTMModel(nn.Module):
         super(LSTMModel, self).__init__()
         # Hidden dimensions
         self.hidden_dim = config['hidden_dim']
-
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         # Number of hidden layers
         self.layer_dim = config['layer_dim']
         self.output_dim = config['output_dim']
@@ -59,35 +59,52 @@ class LSTMModel(nn.Module):
         # batch_first=True causes input/output tensors to be of shape
         # (batch_dim, seq_dim, feature_dim)
         self.lstm = None
-        self.cnn_layers = nn.Sequential(
-            # Defining a 2D convolution layer
-            nn.Conv2d(5, 16, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(16),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2),
 
-            nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2),
+        # VGG
+        vgg16 = models.vgg16_bn(pretrained=False)
+        layers = list(vgg16.features.children())[:-1]
+        layers[0] = nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1)
+        layers[-3] = nn.Conv2d(512, 4, kernel_size=1, stride=1, padding=1)
+        layers[-2] = nn.BatchNorm2d(4, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        self.sensorCNN = nn.Sequential(*layers)
+        self.objectCNN = nn.Sequential(*layers)
+
+        # 1D CNN for text data
+        self.onedCNN = nn.Sequential(
+            nn.Conv1d(1, 64, 5),
+            nn.ReLU(),
+            nn.Dropout(),
+            nn.MaxPool1d(kernel_size=2),
+            nn.Conv1d(64, 64, 5),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=2),
+            nn.Dropout(),
+            nn.Conv1d(64, 64, 5),
+            nn.ReLU(),
         )
+
+
         # Readout layer
         self.fc = nn.Linear(self.hidden_dim, self.output_dim)
         self.relu = nn.ReLU()
         self.softmax = nn.Softmax(dim=1)
+        self.lstm = None
 
 
-    def forward(self, x, hn, cn):
+    def forward(self, sensor, object, text, hn, cn):
+
+        sensorOutput = self.sensorCNN(sensor)
+        objectOutput = self.objectCNN(object)
+        textOutput = self.onedCNN(text)
+
         # Initialize hidden state with zeros
-        batch_size, C, H, W = x.size()
+        batch_size, C, H, W = sensor.size()
         batch_size = int(batch_size / config['seq_dim'])
-        x = self.cnn_layers(x)
-        x = x.view(batch_size, config['seq_dim'], -1)
-
-        lstm_input_size = x.size(2)
-        self.input_dim = lstm_input_size
+        sensor = sensor.view(batch_size, config['seq_dim'], -1)
+        self.input_dim = sensor.size(2)
         if self.lstm is None:
             print('model initialized')
+            print('input_dim',self.input_dim)
             device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
             self.lstm = nn.LSTM(self.input_dim, self.hidden_dim, self.layer_dim, batch_first=True, dropout= 0.4).to(device)
 

@@ -395,6 +395,8 @@ def generateBaseImage(input_dir, file_name, width1 = 0, height1 = 0):
                 # else:
                 #     name = dict['name']
                 # cv2.putText(image, name, (int(center_x), int(center_y)), font, 0.4, (255, 0, 0), 1)
+
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     cv2.imwrite(os.path.join(input_dir, 'houseB.png'), image)
 
 def generateSensorChannel(jsonFile, width = config['image_width'], height = config['image_height'],channel = 1):
@@ -469,20 +471,20 @@ if __name__ == "__main__":
         # Convert JSON to CSV
         # JSON_to_CSV(sys.argv[1])
 
-        # # Generate Dictionary Template for Annotations
-        # generateBaseImage(input_dir, file_name, width1=908, height1= 740)
+        # # Generate Base Image
+        generateBaseImage(input_dir, file_name, width1=908, height1= 740)
 
         # # Generate an Image named Annoation.png , showing all the sensors and objects
         # generateImagewithAllAnnoations(input_dir, file_name)
 
 
         # # Make a folder and save all the annotated Image per minute bases
-        annotateImage(file_name,input_dir, minutesToGenrate = 1000)
+        # annotateImage(file_name,input_dir, minutesToGenrate = 1000)
 
         # # Generate a video on above generated Image
         # makeVideo(os.path.join(input_dir, 'AnnotatedImage'), fps=10)
 
-        # # Generate H5 file for the images per day basic
+        # Generate H5 file for the images per day basic
         dataset = Sensor(csv_file_path,json_file_path , root_dir=input_dir,
                          transform=None)
         dataset.generateOffline()

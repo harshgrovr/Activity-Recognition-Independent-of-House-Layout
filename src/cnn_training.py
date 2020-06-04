@@ -17,6 +17,7 @@ from datetime import datetime
 import cv2
 
 from src.lstmTraining import getIDFromClassName, getClassnameFromID
+from src.lstmTrainingWithLOOCV import getUniqueStartIndex, getStartAndEndIndex, create_inout_sequences
 from src.network import CNNModel, CNNLSTM, LSTMModel
 import numpy as np
 import matplotlib.pyplot as plt
@@ -72,58 +73,73 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
         print("=> loading checkpoint '{}'".format(path))
         checkpoint = torch.load(path)
         model.load_state_dict(checkpoint['state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
+        # optimizer.load_state_dict(checkpoint['optimizer'])
         start_epoch += checkpoint['epoch']
         print("=> loaded checkpoint '{}' (epoch {})"
               .format(path, checkpoint['epoch']))
     else:
         print("=> no checkpoint found at '{}'".format(path))
 
+
+
     # Get names of all h5 files
     h5Files = [f.split('.h5')[:-1] for f in os.listdir(os.path.join(os.getcwd(), '../','data', file_name, 'h5py')) if f.endswith('.h5')]
 
-    loo = LeaveOneOut()
-    # Just first h5 file stores object channel. Get Object channel from the first file
+    # Just first h5 file stores object and sensor channels. Get Object channel and sensorchannel from the first file
     h5Directory = os.path.join(os.getcwd(), '../', 'data', file_name, 'h5py')
     firstdate = df.iloc[0, 0]
-
     if not isinstance(firstdate, datetime):
-      firstdate = datetime.strptime(firstdate, '%d-%b-%Y %H:%M:%S')
+        firstdate = datetime.strptime(firstdate, '%d-%b-%Y %H:%M:%S')
     firstdate = firstdate.strftime('%d-%b-%Y') + '.h5'
 
+    # Get sensor value stored in first h5 file
     with h5py.File(os.path.join(h5Directory, firstdate), 'r') as f:
         objectsChannel = f['object'].value
         sensorChannel = f['sensor'].value
 
+
+    # Prepare text data
+    # Generate unique index for each day in csv
+    uniqueIndex = getUniqueStartIndex(df)
+
+
     # Apply Leave one out on all the h5 files(h5files list)
+    loo = LeaveOneOut()
     for train_index, test_index in loo.split(h5Files):
         print('split: ', total_num_iteration_for_LOOCV)
         total_num_iteration_for_LOOCV += 1
-        # Train
 
-        # Test
-        file_index = test_index[-1]
-        date = datetime.strptime(h5Files[file_index][0], '%d-%b-%Y')
-        file_path = os.path.join(h5Directory, date.strftime('%d-%b-%Y') + '.h5')
-        dataset = datasetHDF5(objectsChannel,sensorChannel, curr_file_path=file_path)
-        testLoader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'], drop_last=True)
+        start, end = getStartAndEndIndex(df, uniqueIndex[test_index])
+        if start != 0:
+            dfFrames = [df[:start - 1], df[end + 1:]]
+            trainDataFrame = pd.concat(dfFrames)
+        else:
+            trainDataFrame = df[end + 1:]
 
-        for file_index in train_index:
-            date = datetime.strptime(h5Files[file_index][0], '%d-%b-%Y')
-            file_path = os.path.join(h5Directory, date.strftime('%d-%b-%Y') + '.h5')
+        trainDataseq = create_inout_sequences(trainDataFrame, config['seq_dim'])
 
-            dataset = datasetHDF5(objectsChannel, sensorChannel, curr_file_path=file_path)
-            trainLoader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False,
-                                     num_workers=config['num_workers'], drop_last=True)
+        testDataFrame = df[start - config['seq_dim']: end]
+        testDataSeq = create_inout_sequences(testDataFrame, config['seq_dim'])
 
-            training(config['num_epochs'], testLoader, optimizer, model, criterion, start_epoch, trainLoader)
+        # Train dataLoader
+        trainDataset = datasetHDF5(objectsChannel, sensorChannel, h5Files, h5Directory, train_index, trainDataseq)
+        trainLoader = DataLoader(trainDataset, batch_size=config['batch_size'], shuffle=False,
+                                 num_workers=config['num_workers'], drop_last=True)
 
+        # Test dataLoader
+        testDataset = datasetHDF5(objectsChannel, sensorChannel, h5Files, h5Directory, test_index, testDataSeq)
+        testLoader = DataLoader(testDataset, batch_size=config['batch_size'], shuffle=False,
+                                num_workers=config['num_workers'], drop_last=True)
+
+        training(config['num_epochs'], trainLoader, optimizer, model, criterion, start_epoch, trainLoader)
 
         print('testing it')
         accuracy, per_class_accuracy, f1 = evaluate(testLoader, model)
         print(accuracy, per_class_accuracy, f1)
     print("Avg. Accuracy is {}".format(total_acc_for_LOOCV))
     print("Avg. Accuracy is {}".format(total_acc_for_LOOCV))
+
+
 def image_from_tensor(image):
     image = image[0].numpy()
     image = image[0]
@@ -146,7 +162,7 @@ def training(num_epochs, testLoader, optimizer, model, criterion, start_epoch, t
         running_loss = 0
 
         hn,cn = model.init_hidden(config['batch_size'])
-        for i, (image, label) in enumerate(trainLoader):
+        for i, (image, label, text) in enumerate(trainLoader):
             hn.detach_()
             cn.detach_()
             batch_size, timesteps, H, W, C = image.size()
@@ -199,15 +215,6 @@ def training(num_epochs, testLoader, optimizer, model, criterion, start_epoch, t
                 'state_dict': model.state_dict(),
                 'optimizer': optimizer.state_dict(),
             }, True)
-
-            # # Logging Gradients
-            # for tag, value in model.named_parameters():
-            #     tag = tag.replace('.', '/')
-            #     writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + 1)
-
-            # # plot weights historgram
-            # for key in model.linear_layers.state_dict():
-            #     writer.add_histogram(key, model.linear_layers.state_dict()[key].data.cpu().numpy(), epoch + 1)
 
         # Loggin loss
         writer.add_scalar('Loss', running_loss, epoch + 1)

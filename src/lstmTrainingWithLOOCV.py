@@ -13,9 +13,10 @@ from torch.utils.data.sampler import Sampler, WeightedRandomSampler
 from sklearn.metrics import f1_score
 from torch.utils.tensorboard import SummaryWriter
 
+
 from src.network import LSTM
 import numpy as np
-#import seaborn as sn
+import seaborn as sn
 import pandas as pd
 from sklearn.metrics import confusion_matrix
 import matplotlib.pyplot as plt
@@ -141,8 +142,7 @@ def train(csv_file, ActivityIdList):
     total_acc_for_LOOCV = 0
     score = 0
     accuracy = 0
-    confusion_matrix = torch.zeros(config['output_dim'], config['output_dim'])
-
+    confusion_matrix = np.zeros((config['output_dim'], config['output_dim']))
     # read csv File
     df = pd.read_csv(csv_file)
     # Generate unique index for each day in csv
@@ -152,7 +152,7 @@ def train(csv_file, ActivityIdList):
     loo = LeaveOneOut()
     print('Total splits: ', len(uniqueIndex) - 1)
     print('Total Epochs per split:', config['num_epochs'])
-
+    total_num_iteration_for_LOOCV = len(uniqueIndex) - 1
     # Generate split over uniqueIndex and train and evaluate over it
     for train_index, test_index in loo.split(uniqueIndex):
         model = LSTM(config['input_dim'], config['hidden_dim'])
@@ -168,16 +168,16 @@ def train(csv_file, ActivityIdList):
         start_epoch = 0
 
         # # Load Saved Model if exists
-        # if os.path.isfile(path):
-        #     print("=> loading checkpoint '{}'".format(path))
-        #     checkpoint = torch.load(path)
-        #     model.load_state_dict(checkpoint['state_dict'])
-        #     optimizer.load_state_dict(checkpoint['optimizer'])
-        #     start_epoch += checkpoint['epoch']
-        #     print("=> loaded checkpoint '{}' (epoch {})"
-        #           .format(path, checkpoint['epoch']))
-        # else:
-        #     print("=> no checkpoint found at '{}'".format(path))
+        if os.path.isfile(path):
+            print("=> loading checkpoint '{}'".format(path))
+            checkpoint = torch.load(path, map_location=torch.device('cpu'))
+            model.load_state_dict(checkpoint['state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            start_epoch += checkpoint['epoch']
+            print("=> loaded checkpoint '{}' (epoch {})"
+                  .format(path, checkpoint['epoch']))
+        else:
+            print("=> no checkpoint found at '{}'".format(path))
 
         # Get start and end of test dataset
         start, end = getStartAndEndIndex(df, uniqueIndex[test_index])
@@ -195,11 +195,13 @@ def train(csv_file, ActivityIdList):
 
         # generate train sequence list based upon above dataframe.
         trainDataseq = create_inout_sequences(trainDataFrame, config['seq_dim'])
-        # testLoader = []
+        testLoader = []
         # Make Test DataLoader
-        flag =0
+        flag = 0
+
         if start - config['seq_dim'] > 0:
-            flag =1
+            flag = 1
+            print('start and end is: ',start, end)
             testDataFrame = df[start - config['seq_dim']: end]
             testDataSeq = create_inout_sequences(testDataFrame, config['seq_dim'])
             testDataset = datasetCSV(testDataSeq, config['seq_dim'])
@@ -219,30 +221,44 @@ def train(csv_file, ActivityIdList):
         training(config['num_epochs'], trainLoader, optimizer, model, criterion, config['seq_dim'],
                  config['input_dim'], config['batch_size'],
                  df, None, start_epoch, file_name, flag)
-
+        per_class_accuracies = np.zeros(config['output_dim'])
         # Generate Test DataLoader
         if start - config['seq_dim'] > 0:
             print('Testing')
-            acc, _, loss, f1, matrix = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
+            acc, per_class_accuracy, loss, f1, matrix = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
                  config['batch_size'], criterion)
             print('testing accuracy', acc)
-            print('testing loss', loss)
+            # print('testing loss', loss)
+            print('F1 score', f1)
+            print('per class acuracy : ', per_class_accuracy)
+            # print('confusion matrix: ',confusion_matrix)
             score += f1
-            confusion_matrix += matrix
+            confusion_matrix += np.array(matrix)
             accuracy += acc
+            per_class_accuracies += np.array(per_class_accuracy)
+
+            print('avg score: ', (score / total_num_iteration_for_LOOCV))
+            print('per class accuracy : ', np.divide(per_class_accuracies, np.array(total_num_iteration_for_LOOCV)))
+            print('confusion matrix: ', np.divide(confusion_matrix, np.array(total_num_iteration_for_LOOCV)))
+            print('avg accuracy: ', (accuracy / (total_num_iteration_for_LOOCV)))
 
 
-    print('avg score: ', (score / (total_num_iteration_for_LOOCV - 1)))
-    print('confusion matrix: ', (confusion_matrix / (total_num_iteration_for_LOOCV - 1)))
-    print('avg accuracy: ', (accuracy / (total_num_iteration_for_LOOCV - 1)))
+
+    confusion_matrix *= np.array(total_num_iteration_for_LOOCV)
+    confusion_matrix /= total_num_iteration_for_LOOCV -3
+    confusion_matrix = confusion_matrix.astype(int)
+    # print('avg score: ', (score / total_num_iteration_for_LOOCV))
+    # print('per class accuracy : ', np.divide(per_class_accuracies, np.array(total_num_iteration_for_LOOCV)))
+    # print('confusion matrix: ', np.divide(confusion_matrix , np.array(total_num_iteration_for_LOOCV)))
+    # print('avg accuracy: ', (accuracy / (total_num_iteration_for_LOOCV)))
 
     pd.isnull(np.array([np.nan, -1], dtype=float))
 
     df_cm = pd.DataFrame(confusion_matrix, index=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])],
                          columns=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])], dtype=float)
-    # plt.figure(figsize=(20, 20))
-    # sn.heatmap(df_cm, annot=True)
-    # plt.show()
+    plt.figure(figsize=(20, 20))
+    sn.heatmap(df_cm, annot=True)
+    plt.show()
 
 
 def log_mean_class_accuracy(writer, per_class_accuracy, epoch, datasettype):
@@ -344,11 +360,13 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
     confusion_matrix = torch.zeros(nb_classes, nb_classes)
     correct = 0
     total = 1
+    batches = 0
     # Iterate through test dataset
     with torch.no_grad():
         f1 = 0
-        for input, labels in testLoader:
+        for i, (input, labels) in enumerate(testLoader):
             input = input.view(-1, seq_dim, input_dim)
+            batches = i
             # Load images to a Torch Variable
             if torch.cuda.is_available():
                 input = input.float().cuda()
@@ -380,8 +398,9 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
                 # print(correct)
             for t, p in zip(labels.view(-1), predicted.view(-1)):
                 confusion_matrix[t.long(), p.long()] += 1
-    # print('F1 SCORE',f1)
 
+    # print('F1 SCORE',f1/batches)
+    f1 = f1/batches
     # print('per class accuracy')
     per_class_acc = confusion_matrix.diag() / confusion_matrix.sum(1)
     per_class_acc = per_class_acc.cpu().numpy()
