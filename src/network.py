@@ -10,7 +10,7 @@ from config.config import config
 class CNNModel(nn.Module):
     def __init__(self):
         super(CNNModel, self).__init__()
-        vgg16 = models.vgg16_bn(pretrained=False)
+        vgg16 = models.vgg16_bn(pretrained=True)
         layers = list(vgg16.features.children())[:-1]
         layers[0] = nn.Conv2d(4, 64, kernel_size=3, stride=1, padding=1)
         self.features = nn.Sequential(*layers)
@@ -45,70 +45,120 @@ class LSTMModel(nn.Module):
             cn = torch.zeros(self.layer_dim, self.batch_size, self.hidden_dim)
         return hn, cn
 
+    def init_weights(self, m):
+        if type(m) == nn.Conv2d or type(m) == nn.Linear:
+            torch.nn.init.xavier_uniform(m.weight)
+            m.bias.data.fill_(0.01)
+        return m
+
+    def initLstmWeights(self, lstm):
+        for name, param in lstm.named_parameters():
+            if 'bias' in name:
+                nn.init.constant(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_normal(param)
+        return lstm
+
     def __init__(self):
         super(LSTMModel, self).__init__()
         # Hidden dimensions
         self.hidden_dim = config['hidden_dim']
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
         # Number of hidden layers
         self.layer_dim = config['layer_dim']
         self.output_dim = config['output_dim']
         self.input_dim = config['input_dim']
         self.seq_dim = config['seq_dim']
-        # Building your LSTM
-        # batch_first=True causes input/output tensors to be of shape
-        # (batch_dim, seq_dim, feature_dim)
         self.lstm = None
 
         # VGG
         vgg16 = models.vgg16_bn(pretrained=False)
-        layers = list(vgg16.features.children())[:-1]
+        layers = list(vgg16.features.children())
+
+        # Freeze all layers except top 3 cnn
+        for layer in layers[:-11]:
+            if not isinstance(layer, (nn.ReLU, nn.MaxPool2d)):
+                layer.weight.requires_grad = False
+                layer.bias.requires_grad = False
+
+        # for i, layer in enumerate(layers[-11:]):
+        #     if not isinstance(layer, (nn.ReLU, nn.MaxPool2d)):
+        #         print(layer.weight)
+        #         break
+
+        # Initialize Unfreezed Conv layers' biases and weights
+        for i, layer in enumerate(layers[-11:]):
+            if not isinstance(layer, (nn.ReLU, nn.MaxPool2d)):
+                self.init_weights(layer)
+
+        # for i, layer in enumerate(layers[-11:]):
+        #     if not isinstance(layer, (nn.ReLU, nn.MaxPool2d)):
+        #         print(layer.weight)
+        #         break
+
+        # Change Initial Layer and add 1 * 1 Cnn as the last conv layer
         layers[0] = nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1)
-        layers[-3] = nn.Conv2d(512, 4, kernel_size=1, stride=1, padding=1)
-        layers[-2] = nn.BatchNorm2d(4, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        layers[0].weight.requires_grad = False
+        layers[0].bias.requires_grad = False
+        layers[-3] = nn.Conv2d(512, 128, kernel_size=1, stride=1, padding=1)
+        layers[-2] = nn.BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+
         self.sensorCNN = nn.Sequential(*layers)
         self.objectCNN = nn.Sequential(*layers)
+        self.imageCNN = nn.Sequential(*layers)
+        self.oneByOneCNN = nn.Conv2d(384, config['seq_dim'], kernel_size=1)
 
-        # 1D CNN for text data
-        self.onedCNN = nn.Sequential(
-            nn.Conv1d(1, 64, 5),
-            nn.ReLU(),
-            nn.Dropout(),
-            nn.MaxPool1d(kernel_size=2),
-            nn.Conv1d(64, 64, 5),
-            nn.ReLU(),
-            nn.MaxPool1d(kernel_size=2),
-            nn.Dropout(),
-            nn.Conv1d(64, 64, 5),
-            nn.ReLU(),
-        )
-
+        # # Check model train params, like requires gradient etc
+        # vgg16 = self.sensorCNN
+        # for layer in list(vgg16.children()):
+        #     print(layer)
+        #     if not isinstance(layer, (nn.ReLU, nn.MaxPool2d)):
+        #         print(layer.weight.requires_grad)
+        #
+        #     # Find total parameters and trainable parameters
+        # total_params = sum(p.numel() for p in vgg16.parameters())
+        # print('total parameters', total_params)
+        # total_trainable_params = sum(
+        #     p.numel() for p in vgg16.parameters() if p.requires_grad)
+        # print('total_trainable_params', total_trainable_params)
 
         # Readout layer
         self.fc = nn.Linear(self.hidden_dim, self.output_dim)
+        self.fc = self.init_weights(self.fc)
         self.relu = nn.ReLU()
-        self.softmax = nn.Softmax(dim=1)
         self.lstm = None
 
 
-    def forward(self, sensor, object, text, hn, cn):
+    def forward(self, image, label, objectChannel, sensorChannel, textData, hn, cn):
 
-        sensorOutput = self.sensorCNN(sensor)
-        objectOutput = self.objectCNN(object)
-        textOutput = self.onedCNN(text)
+        # Get original Batch_Size
+        batch_size, C, H, W = image.size()
+        batch_size = int(batch_size/config['seq_dim'])
 
-        # Initialize hidden state with zeros
-        batch_size, C, H, W = sensor.size()
-        batch_size = int(batch_size / config['seq_dim'])
-        sensor = sensor.view(batch_size, config['seq_dim'], -1)
-        self.input_dim = sensor.size(2)
+        # Pass Image, Object and Input to VGG
+        objectOutput = self.objectCNN(objectChannel)
+        imageOutput = self.imageCNN(image)
+        sensorOutput = self.sensorCNN(sensorChannel)
+
+        # Concatenate the output
+        concatOutput = torch.cat((imageOutput, objectOutput, sensorOutput), dim=1)
+        concatOutput = self.oneByOneCNN(concatOutput)
+        concatOutput = concatOutput.view(batch_size, config['seq_dim'], -1)
+        concatOutput = torch.cat((concatOutput, textData), dim=2)
+        self.input_dim = concatOutput.size(2)
+
+        # Create LSTM model based upon concatSize
         if self.lstm is None:
             print('model initialized')
             print('input_dim',self.input_dim)
             device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
             self.lstm = nn.LSTM(self.input_dim, self.hidden_dim, self.layer_dim, batch_first=True, dropout= 0.4).to(device)
 
-        output, (hn, cn) = self.lstm(x, (hn, cn))
+            # Initialize LSTM weights and biases
+            self.lstm = self.initLstmWeights(self.lstm)
+
+
+        output, (hn, cn) = self.lstm(concatOutput, (hn, cn))
 
         output = self.fc(output[:, :, :])
         return output, (hn, cn)

@@ -397,6 +397,8 @@ def generateBaseImage(input_dir, file_name, width1 = 0, height1 = 0):
                 # cv2.putText(image, name, (int(center_x), int(center_y)), font, 0.4, (255, 0, 0), 1)
 
     image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    image[image==76] = 0
+    print(np.unique(image))
     cv2.imwrite(os.path.join(input_dir, 'houseB.png'), image)
 
 def generateSensorChannel(jsonFile, width = config['image_width'], height = config['image_height'],channel = 1):
@@ -407,14 +409,14 @@ def generateSensorChannel(jsonFile, width = config['image_width'], height = conf
     sensorChannel = np.zeros((height, width, channel), dtype=int)
     for sensor in d['sensorLocation']:
         x1, y1, x2, y2 = sensor['location']
-        sensorChannel[y1:y2, x1:x2, :] = 1
+        sensorChannel[y1:y2, x1:x2, :] = 2
 
     sensorChannel = sensorChannel.astype('uint8')
     sensorChannel = cv2.resize(sensorChannel, (config['resize_width'], config['resize_height']),
                                interpolation=cv2.INTER_AREA)
     sensorChannel = sensorChannel.reshape((config['resize_width'], config['resize_height'], 1))
 
-    # cv2.imwrite("sensorChannel.jpg", sensorChannel * 255)
+    cv2.imwrite("sensorChannel.jpg", sensorChannel * 255)
 
     return sensorChannel
 
@@ -473,7 +475,9 @@ if __name__ == "__main__":
 
         # # Generate Base Image
         generateBaseImage(input_dir, file_name, width1=908, height1= 740)
-
+        with open(json_file_path, 'r') as f:
+            jsonFile = json.load(f)
+        generateSensorChannel(jsonFile)
         # # Generate an Image named Annoation.png , showing all the sensors and objects
         # generateImagewithAllAnnoations(input_dir, file_name)
 
@@ -485,9 +489,9 @@ if __name__ == "__main__":
         # makeVideo(os.path.join(input_dir, 'AnnotatedImage'), fps=10)
 
         # Generate H5 file for the images per day basic
-        dataset = Sensor(csv_file_path,json_file_path , root_dir=input_dir,
-                         transform=None)
-        dataset.generateOffline()
+        # dataset = Sensor(csv_file_path,json_file_path , root_dir=input_dir,
+        #                  transform=None)
+        # dataset.generateOffline()
 
 
 

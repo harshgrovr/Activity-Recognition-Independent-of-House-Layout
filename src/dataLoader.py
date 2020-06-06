@@ -46,6 +46,7 @@ class datasetHDF5(Dataset):
     def __getitem__(self, idx):
 
         self.textData = self.csv_input[idx][0]
+
         self.textData = torch.as_tensor(np.array(self.textData).astype('float'))
 
         if self.count < len(self.train_index):
@@ -56,13 +57,13 @@ class datasetHDF5(Dataset):
 
         with h5py.File(self.currentFilePath, 'r') as f:
             self.h5File = f
-            input = self.h5File['images'][idx : idx + config['seq_dim'], :, :, :]
+            image = self.h5File['images'][idx : idx + config['seq_dim'], :, :, 0]
             label = self.h5File['labels'][idx: idx + config['seq_dim']]
             
-            input = np.concatenate((input, self.objectChannel), axis=3)
-            input = np.concatenate((input, self.sensorChannel), axis=3)
+            # input = np.concatenate((input, self.objectChannel), axis=3)
+            # input = np.concatenate((input, self.sensorChannel), axis=3)
 
-        return input, label, self.textData
+        return image, label, self.objectChannel, self.sensorChannel, self.textData
 
     def __len__(self):
         # Equal to number of rows in current h5 file corresponding to current data

@@ -31,6 +31,21 @@ def save_checkpoint(state, is_best, filename='checkpoint_cnn_lstm.pth.tar'):
     if is_best:
         shutil.copyfile(filename, saved_model_path)
 
+def create_inout_sequences(input_data, tw ):
+    inout_seq = []
+    L = len(input_data)
+    for i in range(L-tw):
+        train_seq = input_data.iloc[i:i+tw, input_data.columns.isin(['time_of_the_day'])]
+        train_seq = train_seq.values
+        train_label = input_data.iloc[i:i+tw, input_data.columns.isin(['activity'])]
+        train_label = train_label.values
+        # (values, counts) = np.unique(train_label, return_counts=True)
+        # ind = np.argmax(counts)
+        # train_label = values[ind]
+        for i in range(len(train_label)):
+            train_label[i] = getIDFromClassName(train_label[i])
+        inout_seq.append((train_seq, train_label))
+    return inout_seq
 
 def train(file_name, input_dir, csv_file_path, json_file_path):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -39,11 +54,11 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
 
     # Defining Model, Optimizer and Loss
     model = LSTMModel().to(device)
-
+    avg_accuracy, avg_per_class_accuracy, avg_f1 = 0
     print('cuda available: ', torch.cuda.is_available())
 
     df = pd.read_csv(csv_file_path)
-
+    print(df['activity'].unique())
     # Get class Frequency as a dictionary
     classFrequencyDict = df['activity'].value_counts().to_dict()
     temp_dict = {}
@@ -110,35 +125,38 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
         total_num_iteration_for_LOOCV += 1
 
         start, end = getStartAndEndIndex(df, uniqueIndex[test_index])
+
         if start != 0:
             dfFrames = [df[:start - 1], df[end + 1:]]
             trainDataFrame = pd.concat(dfFrames)
         else:
             trainDataFrame = df[end + 1:]
 
-        trainDataseq = create_inout_sequences(trainDataFrame, config['seq_dim'])
-
-        testDataFrame = df[start - config['seq_dim']: end]
-        testDataSeq = create_inout_sequences(testDataFrame, config['seq_dim'])
-
         # Train dataLoader
+        trainDataseq = create_inout_sequences(trainDataFrame[0:100], config['seq_dim'])
         trainDataset = datasetHDF5(objectsChannel, sensorChannel, h5Files, h5Directory, train_index, trainDataseq)
         trainLoader = DataLoader(trainDataset, batch_size=config['batch_size'], shuffle=False,
                                  num_workers=config['num_workers'], drop_last=True)
-
-        # Test dataLoader
-        testDataset = datasetHDF5(objectsChannel, sensorChannel, h5Files, h5Directory, test_index, testDataSeq)
-        testLoader = DataLoader(testDataset, batch_size=config['batch_size'], shuffle=False,
-                                num_workers=config['num_workers'], drop_last=True)
-
         training(config['num_epochs'], trainLoader, optimizer, model, criterion, start_epoch, trainLoader)
 
-        print('testing it')
-        accuracy, per_class_accuracy, f1 = evaluate(testLoader, model)
-        print(accuracy, per_class_accuracy, f1)
-    print("Avg. Accuracy is {}".format(total_acc_for_LOOCV))
-    print("Avg. Accuracy is {}".format(total_acc_for_LOOCV))
+        # Test dataLoader
+        if start - config['seq_dim'] > 0:
+            testDataFrame = df[start - config['seq_dim']: end]
+            testDataSeq = create_inout_sequences(testDataFrame[0:100], config['seq_dim'])
+            testDataset = datasetHDF5(objectsChannel, sensorChannel, h5Files, h5Directory, test_index, testDataSeq)
+            testLoader = DataLoader(testDataset, batch_size=config['batch_size'], shuffle=False,
+                                    num_workers=config['num_workers'], drop_last=True)
+            print('testing it')
+            accuracy, per_class_accuracy, f1 = evaluate(testLoader, model)
+            avg_accuracy += accuracy
+            avg_per_class_accuracy += per_class_accuracy
+            avg_f1 += f1
+            print('in meanwhile testing: ')
+            print(avg_accuracy, avg_per_class_accuracy, avg_f1)
 
+    print("Avg. Accuracy is {}".format(avg_accuracy/total_num_iteration_for_LOOCV))
+    print("Avg. per_class_accuracy is {}".format(avg_per_class_accuracy/total_num_iteration_for_LOOCV))
+    print("Avg. F1 is {}".format(avg_f1/total_num_iteration_for_LOOCV))
 
 def image_from_tensor(image):
     image = image[0].numpy()
@@ -162,21 +180,34 @@ def training(num_epochs, testLoader, optimizer, model, criterion, start_epoch, t
         running_loss = 0
 
         hn,cn = model.init_hidden(config['batch_size'])
-        for i, (image, label, text) in enumerate(trainLoader):
+        for i, (image, label, objectChannel, sensorChannel, textData) in enumerate(trainLoader):
             hn.detach_()
             cn.detach_()
-            batch_size, timesteps, H, W, C = image.size()
-            image = image.view(batch_size * timesteps, H,W,C)
+            batch_size, timesteps, H, W = image.size()
+
+            # Change Image shape
+            image = image.view(batch_size * timesteps, H,W,1)
             image = image.permute(0, 3, 1, 2)  # from NHWC to NCHW
+
+            # Change object channel shape
+            objectChannel = objectChannel.view(batch_size * timesteps, H, W, 1)
+            objectChannel = objectChannel.permute(0, 3, 1, 2)  # from NHWC to NCHW
+
+            # Change object channel shape
+            sensorChannel = sensorChannel.view(batch_size * timesteps, H, W, 1)
+            sensorChannel = sensorChannel.permute(0, 3, 1, 2)  # from NHWC to NCHW
 
             if i % 10 == 9:
                 print(i)
 
             image = image.float().to(device)
             label = label.to(device)
+            objectChannel = objectChannel.float().to(device)
+            sensorChannel = sensorChannel.float().to(device)
+            textData = textData.float().to(device)
 
             # Forward pass to get output/ logits
-            output, (hn,cn) = model(image, hn,cn)
+            output, (hn,cn) = model(image, label,objectChannel, sensorChannel,textData, hn,cn)
 
             # Calculate Loss: softmax --> cross entropy loss
             label = label.view(-1)
@@ -230,36 +261,52 @@ def evaluate(testLoader, model):
     total = 0
     f1 = 0
     batches = 0
-    # Iterate through test dataset
+
     # Iterate through test dataset
     with torch.no_grad():
         hn, cn = model.init_hidden(config['batch_size'])
-        for i, (images, labels) in enumerate(testLoader):
+        for i, (image, labels, objectChannel, sensorChannel, textData) in enumerate(testLoader):
             hn.detach_()
             cn.detach_()
-            batch_size, timesteps, H, W, C = images.size()
-            images = images.view(batch_size * timesteps, H, W, C)
-            images = images.permute(0, 3, 1, 2)  # from NHWC to NCHW
+            batch_size, timesteps, H, W = image.size()
 
-            # Load images to a Torch Variable
+            # Change Image shape
+            image = image.view(batch_size * timesteps, H, W, 1)
+            image = image.permute(0, 3, 1, 2)  # from NHWC to NCHW
 
-            images = images.float().to(device)
+            # Change object channel shape
+            objectChannel = objectChannel.view(batch_size * timesteps, H, W, 1)
+            objectChannel = objectChannel.permute(0, 3, 1, 2)  # from NHWC to NCHW
 
-            # Forward pass to get output/logits
-            outputs, (hn, cn) = model(images, hn, cn)
+            # Change object channel shape
+            sensorChannel = sensorChannel.view(batch_size * timesteps, H, W, 1)
+            sensorChannel = sensorChannel.permute(0, 3, 1, 2)  # from NHWC to NCHW
+
+            if i % 10 == 9:
+                print(i)
+
+            image = image.float().to(device)
+            labels = labels.to(device)
+            objectChannel = objectChannel.float().to(device)
+            sensorChannel = sensorChannel.float().to(device)
+            textData = textData.float().to(device)
+
+            # Forward pass to get output/ logits
+            output, (hn, cn) = model(image,labels, objectChannel, sensorChannel, textData, hn, cn)
+
             labels = labels.view(-1)
-            outputs = outputs.view(-1, outputs.size(2))
+            output = output.view(-1, output.size(2))
 
             # Get predictions from the maximum value
-            _, predicted = torch.max(outputs.data, 1)
-
-            f1 += f1_score(labels.cpu(), predicted.cpu(), average='weighted')
-            batches = i
-            print('batche: ',batches)
-            # Total number of labels
-            total += labels.size(0)
+            _, predicted = torch.max(output.data, 1)
             # Total correct predictions
             correct += (predicted.to(device) == labels.to(device)).sum()
+            f1 += f1_score(labels.cpu(), predicted.cpu(), average='macro')
+            batches = i
+            print('batch: ',batches)
+            # Total number of labels
+            total += labels.size(0)
+
             for t, p in zip(labels.view(-1), predicted.view(-1)):
                 confusion_matrix[t.long(), p.long()] += 1
     f1 = f1/batches
@@ -274,7 +321,6 @@ def evaluate(testLoader, model):
             d[getClassnameFromID(i)] = per_class_acc[i]
 
     print(d)
-
 
     # pd.isnull(np.array([np.nan, -1], dtype=float))
 

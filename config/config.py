@@ -1,16 +1,16 @@
 #!/usr/bin/env python
 config = {
 "learning_rate" : 0.0004,
-"num_epochs" : 70,
+"num_epochs" : 50,
 "decay" : 1e-5,
 "input_dim" : 23,
 "hidden_dim" : 300,
 "layer_dim" : 1,
-"output_dim" : 18,
-"seq_dim" : 5,
-"batch_size" : 4,
+"output_dim" : 13,
+"seq_dim" : 10,
+"batch_size" : 16,
 "split_ratio" : 0.5,
-"num_workers":0,
+"num_workers":8,
 "accumulation_steps": 3,
 "no_of_subset":30 ,
 "subset_overlap_length": 2 ,
@@ -29,14 +29,9 @@ config = {
             {"name": "getDressed", "id": 6},
             {"name": "prepareBreakfast", "id": 7},
             {"name": "prepareDinner", "id": 8},
-            {"name": "getSnack", "id": 9},
-            {"name": "getDrink", "id": 10},
-            {"name": "loadDishwasher", "id": 11},
-            {"name": "unloadDishwasher", "id": 12},
-            {"name": "storeGroceries", "id": 13},
-            {"name": "washDishes", "id": 14},
-            {"name": "answerPhone", "id": 15},
-            {"name": "eatDinner", "id": 16},
-            {"name": "eatBreakfast", "id": 17}
+            {"name": "getDrink", "id": 9},
+            {"name": "washDishes", "id": 10},
+            {"name": "eatDinner", "id": 11},
+            {"name": "eatBreakfast", "id": 12}
         ]
 }
