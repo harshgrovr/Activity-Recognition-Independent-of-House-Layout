@@ -3,36 +3,41 @@ import torchvision.models as models
 import torch.nn as nn
 from torch.autograd import Variable
 import numpy as np
+from torch.nn import init
+
 from Better_LSTM_PyTorch.better_lstm import LSTM
 from config.config import config
 
+import torch.nn.functional as F
 
 class CNNModel(nn.Module):
     def __init__(self):
         super(CNNModel, self).__init__()
-        vgg16 = models.vgg16_bn(pretrained=True)
-        layers = list(vgg16.features.children())[:-1]
-        layers[0] = nn.Conv2d(4, 64, kernel_size=3, stride=1, padding=1)
-        self.features = nn.Sequential(*layers)
+        self.model = models.vgg16_bn(pretrained=False)
+        for param in self.model.parameters():
+            param.requires_grad = False
+        layers = list(self.model.features.children())
+        layers[0] = nn.Conv2d(1, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        for param in layers[0].parameters():
+            param.requires_grad = False
 
-        # Classifier
-        self.classifier = nn.Sequential(
-            nn.Linear(512 * 14 * 14, 128),
-            nn.ReLU(),
-            nn.Linear(128, 22),
-        )
+        self.model.features = nn.Sequential(*layers)
+        n_inputs = self.model.classifier[6].in_features
+        # Add on classifier
+        self.model.classifier[6] = nn.Sequential(
+            nn.Linear(n_inputs, 256), nn.ReLU(), nn.Dropout(0.4),
+            nn.Linear(256, config['output_dim']))
+
+        print(self.model)
 
     def forward(self, x):
-        x = self.features(x)
-        x = x.reshape(-1,  512 * 14 * 14)
-        out = self.classifier(x)
-
-        return out
+        x = self.model(x)
+        return x
 
 
 class LSTMModel(nn.Module):
     def init_hidden(self, batch_size):
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.batch_size = batch_size
         if torch.cuda.is_available():
             print('****  init_hidden ********')
@@ -140,6 +145,7 @@ class LSTMModel(nn.Module):
         imageOutput = self.imageCNN(image)
         sensorOutput = self.sensorCNN(sensorChannel)
 
+
         # Concatenate the output
         concatOutput = torch.cat((imageOutput, objectOutput, sensorOutput), dim=1)
         concatOutput = self.oneByOneCNN(concatOutput)
@@ -151,7 +157,7 @@ class LSTMModel(nn.Module):
         if self.lstm is None:
             print('model initialized')
             print('input_dim',self.input_dim)
-            device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             self.lstm = nn.LSTM(self.input_dim, self.hidden_dim, self.layer_dim, batch_first=True, dropout= 0.4).to(device)
 
             # Initialize LSTM weights and biases
@@ -162,8 +168,6 @@ class LSTMModel(nn.Module):
 
         output = self.fc(output[:, :, :])
         return output, (hn, cn)
-
-
 
 class HARmodel(nn.Module):
     """Model for human-activity-recognition."""
@@ -243,4 +247,149 @@ class CNNLSTM(nn.Module):
             self.model = LSTMModel()
 
         output, (hn, cn) = self.model((x, (hn,cn)))
+        return output, (hn, cn)
+
+
+class Residual(nn.Module):
+    def __init__(self, input_channels, num_channels,
+                 use_1x1conv=True, strides=1, dilation=2, padding=1, kernel_size=5):
+        super(Residual, self).__init__()
+        self.conv1 = nn.Conv2d(input_channels, num_channels,
+                               kernel_size=kernel_size, padding=padding, stride=strides, dilation=dilation)
+        self.conv2 = nn.Conv2d(num_channels, num_channels,
+                               kernel_size=kernel_size, padding=2 * padding, dilation=(2 * dilation))
+        if use_1x1conv:
+            self.conv3 = nn.Conv2d(input_channels, num_channels,
+                                   kernel_size=1, stride=strides)
+        else:
+            self.conv3 = None
+        self.bn1 = nn.BatchNorm2d(num_channels)
+        self.bn2 = nn.BatchNorm2d(num_channels)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, X):
+        Y = F.relu(self.bn1(self.conv1(X)))
+        Y = self.bn2(self.conv2(Y))
+        if self.conv3:
+            X = self.conv3(X)
+        Y += X
+        return F.relu(Y)
+
+
+def weight_init(m):
+    '''
+    Usage:
+        model = Model()
+        model.apply(weight_init)
+    '''
+    if isinstance(m, nn.Conv1d):
+        init.normal_(m.weight.data)
+        if m.bias is not None:
+            init.normal_(m.bias.data)
+    elif isinstance(m, nn.Conv2d):
+        init.xavier_normal_(m.weight.data)
+        if m.bias is not None:
+            init.normal_(m.bias.data)
+    elif isinstance(m, nn.Conv3d):
+        init.xavier_normal_(m.weight.data)
+        if m.bias is not None:
+            init.normal_(m.bias.data)
+    elif isinstance(m, nn.ConvTranspose1d):
+        init.normal_(m.weight.data)
+        if m.bias is not None:
+            init.normal_(m.bias.data)
+    elif isinstance(m, nn.ConvTranspose2d):
+        init.xavier_normal_(m.weight.data)
+        if m.bias is not None:
+            init.normal_(m.bias.data)
+    elif isinstance(m, nn.ConvTranspose3d):
+        init.xavier_normal_(m.weight.data)
+        if m.bias is not None:
+            init.normal_(m.bias.data)
+    elif isinstance(m, nn.BatchNorm1d):
+        init.normal_(m.weight.data, mean=1, std=0.02)
+        init.constant_(m.bias.data, 0)
+    elif isinstance(m, nn.BatchNorm2d):
+        init.normal_(m.weight.data, mean=1, std=0.02)
+        init.constant_(m.bias.data, 0)
+    elif isinstance(m, nn.BatchNorm3d):
+        init.normal_(m.weight.data, mean=1, std=0.02)
+        init.constant_(m.bias.data, 0)
+    elif isinstance(m, nn.Linear):
+        init.xavier_normal_(m.weight.data)
+        init.normal_(m.bias.data)
+    elif isinstance(m, nn.LSTM):
+        for param in m.parameters():
+            if len(param.shape) >= 2:
+                init.orthogonal_(param.data)
+            else:
+                init.normal_(param.data)
+    elif isinstance(m, nn.LSTMCell):
+        for param in m.parameters():
+            if len(param.shape) >= 2:
+                init.orthogonal_(param.data)
+            else:
+                init.normal_(param.data)
+    elif isinstance(m, nn.GRU):
+        for param in m.parameters():
+            if len(param.shape) >= 2:
+                init.orthogonal_(param.data)
+            else:
+                init.normal_(param.data)
+    elif isinstance(m, nn.GRUCell):
+        for param in m.parameters():
+            if len(param.shape) >= 2:
+                init.orthogonal_(param.data)
+            else:
+                init.normal_(param.data)
+
+
+class Network(nn.Module):
+    def __init__(self):
+        super(Network, self).__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        num_channels = 64
+        strides = 1
+        dilation = 2
+        padding = 4
+        kernel_size = 5
+        input_channel = 3
+        self.fc = nn.Linear(config['hidden_dim'], config['output_dim'])
+        self.lstm = None
+
+        b1 = Residual(input_channels=input_channel, num_channels=num_channels,
+                      use_1x1conv=True, strides=strides, dilation=dilation, padding=padding, kernel_size=kernel_size)
+
+        b2 = Residual(input_channels=num_channels, num_channels=2 * num_channels,
+                      use_1x1conv=True, strides=strides, dilation=2 * dilation, padding=2 * padding,
+                      kernel_size=kernel_size)
+
+        b3 = Residual(input_channels=2 * num_channels, num_channels=4 * num_channels,
+                      use_1x1conv=True, strides=strides, dilation=4 * dilation, padding=4 * padding,
+                      kernel_size=kernel_size)
+
+        self.net = nn.Sequential(b1, b2, b3, nn.AdaptiveMaxPool2d((2, 2)))
+
+        self.apply(weight_init)
+
+    def forward(self, x):
+        x = self.net(x)
+        x = x.view(config['batch_size'], config['seq_dim'], -1)
+        print(x.size())
+        if self.lstm is None:
+            self.lstm = nn.LSTM(x.size(2), config['hidden_dim'], 1, batch_first=True).to(self.device)
+            for param in self.lstm.parameters():
+                if len(param.shape) >= 2:
+                    init.orthogonal_(param.data)
+                else:
+                    init.normal_(param.data)
+
+        h0 = torch.zeros(config['layer_dim'], x.size(0), config['hidden_dim']).to(self.device)
+        # Initialize cell state
+        c0 = torch.zeros(config['layer_dim'], x.size(0), config['hidden_dim']).to(self.device)
+
+        output, (hn, cn) = self.lstm(x, (h0,c0))
+        output = output[:, :, :]
+        output = self.fc(output)
+
         return output, (hn, cn)

@@ -17,8 +17,8 @@ from datetime import datetime
 import cv2
 
 from src.lstmTraining import getIDFromClassName, getClassnameFromID
-from src.lstmTrainingWithLOOCV import getUniqueStartIndex, getStartAndEndIndex, create_inout_sequences
-from src.network import CNNModel, CNNLSTM, LSTMModel
+from src.lstmTrainingWithLOOCV import getUniqueStartIndex, getStartAndEndIndex
+from src.network import CNNModel, CNNLSTM, LSTMModel, Network
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -53,8 +53,10 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
     total_acc_for_LOOCV = 0
 
     # Defining Model, Optimizer and Loss
-    model = LSTMModel().to(device)
-    avg_accuracy, avg_per_class_accuracy, avg_f1 = 0
+    model = Network().to(device)
+    avg_accuracy = 0
+    avg_per_class_accuracy= 0
+    avg_f1 = 0
     print('cuda available: ', torch.cuda.is_available())
 
     df = pd.read_csv(csv_file_path)
@@ -86,7 +88,7 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
     start_epoch = 0
     if os.path.isfile(path):
         print("=> loading checkpoint '{}'".format(path))
-        checkpoint = torch.load(path)
+        checkpoint = torch.load(path, map_location=torch.device('cpu'))
         model.load_state_dict(checkpoint['state_dict'])
         # optimizer.load_state_dict(checkpoint['optimizer'])
         start_epoch += checkpoint['epoch']
@@ -109,8 +111,8 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
 
     # Get sensor value stored in first h5 file
     with h5py.File(os.path.join(h5Directory, firstdate), 'r') as f:
-        objectsChannel = f['object'].value
-        sensorChannel = f['sensor'].value
+        objectsChannel = np.array(f['object'].value)
+        sensorChannel = np.array(f['sensor'].value)
 
 
     # Prepare text data
@@ -121,8 +123,11 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
     # Apply Leave one out on all the h5 files(h5files list)
     loo = LeaveOneOut()
     for train_index, test_index in loo.split(h5Files):
-        print('split: ', total_num_iteration_for_LOOCV)
+        print('******** SPLIT ************: ', total_num_iteration_for_LOOCV)
         total_num_iteration_for_LOOCV += 1
+
+        if total_num_iteration_for_LOOCV == 3:
+            break
 
         start, end = getStartAndEndIndex(df, uniqueIndex[test_index])
 
@@ -132,20 +137,22 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
         else:
             trainDataFrame = df[end + 1:]
 
-        # Train dataLoader
-        trainDataseq = create_inout_sequences(trainDataFrame[0:100], config['seq_dim'])
-        trainDataset = datasetHDF5(objectsChannel, sensorChannel, h5Files, h5Directory, train_index, trainDataseq)
-        trainLoader = DataLoader(trainDataset, batch_size=config['batch_size'], shuffle=False,
-                                 num_workers=config['num_workers'], drop_last=True)
-        training(config['num_epochs'], trainLoader, optimizer, model, criterion, start_epoch, trainLoader)
-
-        # Test dataLoader
         if start - config['seq_dim'] > 0:
             testDataFrame = df[start - config['seq_dim']: end]
-            testDataSeq = create_inout_sequences(testDataFrame[0:100], config['seq_dim'])
+            testDataSeq = create_inout_sequences(testDataFrame[0:1000], config['seq_dim'])
             testDataset = datasetHDF5(objectsChannel, sensorChannel, h5Files, h5Directory, test_index, testDataSeq)
             testLoader = DataLoader(testDataset, batch_size=config['batch_size'], shuffle=False,
                                     num_workers=config['num_workers'], drop_last=True)
+
+        # Train dataLoader
+        trainDataseq = create_inout_sequences(trainDataFrame[0:1000], config['seq_dim'])
+        trainDataset = datasetHDF5(objectsChannel, sensorChannel, h5Files, h5Directory, train_index, trainDataseq)
+        trainLoader = DataLoader(trainDataset, batch_size=config['batch_size'], shuffle=False,
+                                 num_workers=config['num_workers'], drop_last=True)
+        training(config['num_epochs'], optimizer, model, criterion, start_epoch, trainLoader)
+
+        # Test dataLoader
+        if start - config['seq_dim'] > 0:
             print('testing it')
             accuracy, per_class_accuracy, f1 = evaluate(testLoader, model)
             avg_accuracy += accuracy
@@ -170,7 +177,7 @@ def image_from_tensor(image):
     cv2.waitKey(0)
 
 
-def training(num_epochs, testLoader, optimizer, model, criterion, start_epoch, trainLoader, accumulation_steps = config['accumulation_steps']):
+def training(num_epochs, optimizer, model, criterion, start_epoch, trainLoader, accumulation_steps = config['accumulation_steps']):
 
     writer = SummaryWriter(os.path.join('../logs', file_name, 'cnn_lstm'))
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -183,31 +190,15 @@ def training(num_epochs, testLoader, optimizer, model, criterion, start_epoch, t
         for i, (image, label, objectChannel, sensorChannel, textData) in enumerate(trainLoader):
             hn.detach_()
             cn.detach_()
-            batch_size, timesteps, H, W = image.size()
 
+            batch_size, timesteps, H, W, C = image.size()
             # Change Image shape
-            image = image.view(batch_size * timesteps, H,W,1)
+            image = image.contiguous().view(batch_size * timesteps, H, W, C)
             image = image.permute(0, 3, 1, 2)  # from NHWC to NCHW
-
-            # Change object channel shape
-            objectChannel = objectChannel.view(batch_size * timesteps, H, W, 1)
-            objectChannel = objectChannel.permute(0, 3, 1, 2)  # from NHWC to NCHW
-
-            # Change object channel shape
-            sensorChannel = sensorChannel.view(batch_size * timesteps, H, W, 1)
-            sensorChannel = sensorChannel.permute(0, 3, 1, 2)  # from NHWC to NCHW
-
-            if i % 10 == 9:
-                print(i)
-
             image = image.float().to(device)
             label = label.to(device)
-            objectChannel = objectChannel.float().to(device)
-            sensorChannel = sensorChannel.float().to(device)
-            textData = textData.float().to(device)
-
-            # Forward pass to get output/ logits
-            output, (hn,cn) = model(image, label,objectChannel, sensorChannel,textData, hn,cn)
+            optimizer.zero_grad()
+            output, (hn, cn) = model(image)
 
             # Calculate Loss: softmax --> cross entropy loss
             label = label.view(-1)
@@ -216,24 +207,21 @@ def training(num_epochs, testLoader, optimizer, model, criterion, start_epoch, t
 
             # print(loss)
             running_loss += loss
-            loss = loss / accumulation_steps  # Normalize our loss (if averaged)
             loss.backward()  # Backward pass
-            if i % accumulation_steps == accumulation_steps - 1:  # Wait for several backward steps
-                optimizer.step()  # Now we can do an optimizer step
-                optimizer.zero_grad()  # Reset gradients tensors
+            optimizer.step()  # Now we can do an optimizer step
         print('epoch: {} Loss: {}'.format(epoch, running_loss))
 
         if epoch % 20 == 19:
-            accuracy, per_class_accuracy,f1 = evaluate(testLoader, model)
+            accuracy, per_class_accuracy,f1 = evaluate(trainLoader, model)
+            print('epoch: ', epoch)
             print('train accuracy', accuracy)
             print('per class accuracy', per_class_accuracy)
             print('F1 score', f1)
 
-
-            accuracy, per_class_accuracy, f1 = evaluate(trainLoader, model)
-            print('test accuracy', accuracy)
-            print('per class accuracy', per_class_accuracy)
-            print('F1 score', f1)
+            # accuracy, per_class_accuracy, f1 = evaluate(trainLoader, model)
+            # print('test accuracy', accuracy)
+            # print('per class accuracy', per_class_accuracy)
+            # print('F1 score', f1)
             # Logging mean class accuracy
             d = {}
             for i in range(len(per_class_accuracy)):
@@ -303,7 +291,7 @@ def evaluate(testLoader, model):
             correct += (predicted.to(device) == labels.to(device)).sum()
             f1 += f1_score(labels.cpu(), predicted.cpu(), average='macro')
             batches = i
-            print('batch: ',batches)
+            # print('batch: ',batches)
             # Total number of labels
             total += labels.size(0)
 
@@ -314,10 +302,9 @@ def evaluate(testLoader, model):
     print('per class accuracy')
     per_class_acc = confusion_matrix.diag() / confusion_matrix.sum(1)
     per_class_acc = per_class_acc.cpu().numpy()
-    per_class_acc[np.isnan(per_class_acc)] = -1
+    per_class_acc[np.isnan(per_class_acc)] = 0
     d = {}
     for i in range(len(per_class_acc)):
-        if per_class_acc[i] != -1:
             d[getClassnameFromID(i)] = per_class_acc[i]
 
     print(d)

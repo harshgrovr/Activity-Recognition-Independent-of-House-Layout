@@ -16,7 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from src.network import LSTM
 import numpy as np
-import seaborn as sn
+# import seaborn as sn
 import pandas as pd
 from sklearn.metrics import confusion_matrix
 import matplotlib.pyplot as plt
@@ -431,7 +431,7 @@ if __name__ == "__main__":
         file_name = sys.argv[1].split('.json')[0]
         input_dir = os.path.join(os.getcwd(), '../', 'data', file_name)
         csv_file_path = os.path.join(input_dir, file_name + '.csv')
-        json_file_path = os.path.join(input_dir, file_name + '.json')
+        s_file_path = os.path.join(input_dir, file_name + '.json')
         # csv_length = pd.read_csv(csv_file_path).shape[0]
         ActivityIdList = config['ActivityIdList']
         train(csv_file_path, ActivityIdList)

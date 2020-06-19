@@ -13,7 +13,7 @@ from config.config import config
 class Sensor():
   def __init__(self, csv_file_path, json_file_path, root_dir, transform=None):
     df = pd.read_csv(csv_file_path)
-    self.csvFile = df.iloc[:1000, :]
+    self.csvFile = df.iloc[:, :]
     with open(json_file_path) as f:
       d = json.load(f)
     self.jsonFile = d
@@ -24,26 +24,7 @@ class Sensor():
     self.channel = 1
     self.objectChannel = generateObjectChannels(self.jsonFile, self.width, self.height, self.channel)
     self.sensorChannel = generateSensorChannel(self.jsonFile)
-    self.ActivityIdList = [
-      {"name": "idle", "id": 0},
-      {"name": "leaveHouse", "id": 1},
-      {"name": "useToilet", "id": 2},
-      {"name": "takeShower", "id": 3},
-      {"name": "brushTeeth", "id": 4},
-      {"name": "goToBed", "id": 5},
-      {"name": "getDressed", "id": 6},
-      {"name": "prepareBreakfast", "id": 7},
-      {"name": "prepareDinner", "id": 8},
-      {"name": "getSnack", "id": 9},
-      {"name": "getDrink", "id": 10},
-      {"name": "loadDishwasher", "id": 11},
-      {"name": "unloadDishwasher", "id": 12},
-      {"name": "storeGroceries", "id": 13},
-      {"name": "washDishes", "id": 14},
-      {"name": "answerPhone", "id": 15},
-      {"name": "eatDinner", "id": 16},
-      {"name": "eatBreakfast", "id": 17}
-    ]
+    self.ActivityIdList = config['ActivityIdList']
 
   def getDate(self, start_datetime):
     if not isinstance(start_datetime, datetime):
@@ -58,7 +39,6 @@ class Sensor():
     flag = 0
 
     # loop for each entry of csv, first to last date
-
     while firstdate <= lastDate:
       print(firstdate)
       zeros = np.zeros((1, config['resize_height'], config['resize_width'], 3))
