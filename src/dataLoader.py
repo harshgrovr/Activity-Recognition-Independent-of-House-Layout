@@ -47,10 +47,10 @@ class datasetHDF5(Dataset):
         self.sensorChannel = sensorChannel
 
     def __getitem__(self, idx):
-        print(idx)
-        self.textData = self.csv_input[idx][0]
 
-        self.textData = torch.as_tensor(np.array(self.textData).astype('float'))
+        # self.textData = self.csv_input[idx][0]
+        #
+        # self.textData = torch.as_tensor(np.array(self.textData).astype('float'))
 
         if self.count < len(self.train_index):
             if idx >= sum(self.h5FilelengthList[:self.count + 1]):
@@ -67,13 +67,13 @@ class datasetHDF5(Dataset):
 
         with h5py.File(self.currentFilePath, 'r') as f:
             self.h5File = f
-            image = np.array(self.h5File['images'][idx: idx + config['seq_dim'], :, :, 0])
+            image = np.array(self.h5File['images'][idx: idx + config['seq_dim'], :, :, :])
             label = np.array(self.h5File['labels'][idx: idx + config['seq_dim']])
 
-            # input = np.concatenate((input, self.objectChannel), axis=3)
-            # input = np.concatenate((input, self.sensorChannel), axis=3)
+            input = np.concatenate((image, self.objectChannel), axis=3)
+            input = np.concatenate((input, self.sensorChannel), axis=3)
 
-        return image, label, self.objectChannel, self.sensorChannel, self.textData
+        return input, label
 
     def __len__(self):
         # Equal to number of rows in current h5 file corresponding to current data
@@ -164,9 +164,13 @@ class datasetFolder(Dataset):
                                       key=lambda line: datetime.strptime(line.split(".png")[0], format))
             self.filesinCurrentFolder = [os.path.basename(i) for i in time_sorted_list]
 
+
+        self.image = self.filesinCurrentFolder[(id)% len(self.filesinCurrentFolder)]
+        self.label = self.labelsData[(id) % len(self.filesinCurrentFolder)][self.image.split('.png')[0]]
         for i in range(config['seq_dim']):
             self.image = self.filesinCurrentFolder[(id + i) % len(self.filesinCurrentFolder)]
             self.label = self.labelsData[(id + i) % len(self.filesinCurrentFolder)][self.image.split('.png')[0]]
+            # print(self.image, self.label)
             self.image = cv2.imread(os.path.join(self.currentFolderPath, self.image), 0)
             self.image = np.expand_dims(self.image, axis=2)
             self.image = np.concatenate((self.image, self.objectChannel, self.sensorChannel), axis=2)

@@ -86,16 +86,16 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
 
     path = "../saved_model/cnn_lstm/model_best.pth.tar"
     start_epoch = 0
-    if os.path.isfile(path):
-        print("=> loading checkpoint '{}'".format(path))
-        checkpoint = torch.load(path, map_location=torch.device('cpu'))
-        model.load_state_dict(checkpoint['state_dict'])
-        # optimizer.load_state_dict(checkpoint['optimizer'])
-        start_epoch += checkpoint['epoch']
-        print("=> loaded checkpoint '{}' (epoch {})"
-              .format(path, checkpoint['epoch']))
-    else:
-        print("=> no checkpoint found at '{}'".format(path))
+    # if os.path.isfile(path):
+    #     print("=> loading checkpoint '{}'".format(path))
+    #     checkpoint = torch.load(path, map_location=torch.device('cpu'))
+    #     model.load_state_dict(checkpoint['state_dict'])
+    #     # optimizer.load_state_dict(checkpoint['optimizer'])
+    #     start_epoch += checkpoint['epoch']
+    #     print("=> loaded checkpoint '{}' (epoch {})"
+    #           .format(path, checkpoint['epoch']))
+    # else:
+    #     print("=> no checkpoint found at '{}'".format(path))
 
 
 
@@ -186,14 +186,15 @@ def training(num_epochs, optimizer, model, criterion, start_epoch, trainLoader, 
         print('epoch', epoch + start_epoch)
         running_loss = 0
 
-        hn,cn = model.init_hidden(config['batch_size'])
-        for i, (image, label, objectChannel, sensorChannel, textData) in enumerate(trainLoader):
-            hn.detach_()
-            cn.detach_()
-
+        # hn,cn = model.init_hidden(config['batch_size'])
+        for i, (image, label) in enumerate(trainLoader):
+            # hn.detach_()
+            # cn.detach_()
+            if i % 100 == 0:
+                print('epoch {} , batch {} '.format(epoch, i))
             batch_size, timesteps, H, W, C = image.size()
             # Change Image shape
-            image = image.contiguous().view(batch_size * timesteps, H, W, C)
+            image = image.view(batch_size * timesteps, H, W, C)
             image = image.permute(0, 3, 1, 2)  # from NHWC to NCHW
             image = image.float().to(device)
             label = label.to(device)
@@ -204,15 +205,15 @@ def training(num_epochs, optimizer, model, criterion, start_epoch, trainLoader, 
             label = label.view(-1)
             output = output.view(-1, output.size(2))
             loss = criterion(output, label)
-
             # print(loss)
             running_loss += loss
+            loss *= config['seq_dim']
             loss.backward()  # Backward pass
             optimizer.step()  # Now we can do an optimizer step
         print('epoch: {} Loss: {}'.format(epoch, running_loss))
 
         if epoch % 20 == 19:
-            accuracy, per_class_accuracy,f1 = evaluate(trainLoader, model)
+            accuracy, per_class_accuracy, f1 = evaluate(trainLoader, model)
             print('epoch: ', epoch)
             print('train accuracy', accuracy)
             print('per class accuracy', per_class_accuracy)
@@ -252,35 +253,20 @@ def evaluate(testLoader, model):
 
     # Iterate through test dataset
     with torch.no_grad():
-        hn, cn = model.init_hidden(config['batch_size'])
+        # hn, cn = model.init_hidden(config['batch_size'])
         for i, (image, labels, objectChannel, sensorChannel, textData) in enumerate(testLoader):
-            hn.detach_()
-            cn.detach_()
-            batch_size, timesteps, H, W = image.size()
-
+            # hn.detach_()
+            # cn.detach_()
+            batch_size, timesteps, H, W, C = image.size()
             # Change Image shape
-            image = image.view(batch_size * timesteps, H, W, 1)
+            image = image.view(batch_size * timesteps, H, W, C)
             image = image.permute(0, 3, 1, 2)  # from NHWC to NCHW
-
-            # Change object channel shape
-            objectChannel = objectChannel.view(batch_size * timesteps, H, W, 1)
-            objectChannel = objectChannel.permute(0, 3, 1, 2)  # from NHWC to NCHW
-
-            # Change object channel shape
-            sensorChannel = sensorChannel.view(batch_size * timesteps, H, W, 1)
-            sensorChannel = sensorChannel.permute(0, 3, 1, 2)  # from NHWC to NCHW
-
-            if i % 10 == 9:
-                print(i)
-
             image = image.float().to(device)
             labels = labels.to(device)
-            objectChannel = objectChannel.float().to(device)
-            sensorChannel = sensorChannel.float().to(device)
-            textData = textData.float().to(device)
+
 
             # Forward pass to get output/ logits
-            output, (hn, cn) = model(image,labels, objectChannel, sensorChannel, textData, hn, cn)
+            output, (hn, cn) = model(image,labels)
 
             labels = labels.view(-1)
             output = output.view(-1, output.size(2))

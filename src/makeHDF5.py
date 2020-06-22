@@ -8,8 +8,50 @@ import os
 import sys
 import datetime
 from datetime import datetime, timedelta
-from src.dataGeneration import generateObjectChannels, generateSensorChannelForTheMinute, generateSensorChannel
 from config.config import config
+
+
+def generateSensorChannel(jsonFile, width=config['image_width'], height=config['image_height'], channel=1):
+  # Generate sensors Channel. A single channel for each unique sensor
+  outputChannel = []
+  sensorChannelDict = {}
+  d = jsonFile
+  sensorChannel = np.zeros((height, width, channel), dtype=int)
+  for sensor in d['sensorLocation']:
+    x1, y1, x2, y2 = sensor['location']
+    sensorChannel[y1:y2, x1:x2, :] = 2
+
+  sensorChannel = sensorChannel.astype('uint8')
+  sensorChannel = cv2.resize(sensorChannel, (config['resize_width'], config['resize_height']),
+                             interpolation=cv2.INTER_AREA)
+  sensorChannel = sensorChannel.reshape((config['resize_width'], config['resize_height'], 1))
+
+  cv2.imwrite("sensorChannel.jpg", sensorChannel * 255)
+
+  return sensorChannel
+
+
+def generateObjectChannels(jsonFile, width=config['image_width'], height=config['image_height'], channel=1):
+  # Generate Objects Channel. A single channel for each unique object
+  outputChannel = []
+  objectChannelDict = {}
+  d = jsonFile
+  objectChannel = np.zeros((height, width, channel), dtype=int)
+  for object in d['baseImage']:
+    if object['name'] == 'angleWall':
+      continue
+    x1, y1, x2, y2 = object['location']
+    objectChannel[y1:y2, x1:x2, :] = object['id']
+
+  objectChannel = objectChannel.astype('uint8')
+  objectChannel = cv2.resize(objectChannel, (config['resize_width'], config['resize_height']),
+                             interpolation=cv2.INTER_AREA)
+  objectChannel = objectChannel.reshape((config['resize_width'], config['resize_height'], 1))
+
+  # cv2.imwrite("objectChannel.jpg", objectChannel * 255)
+
+  return objectChannel
+
 class Sensor():
   def __init__(self, csv_file_path, json_file_path, root_dir, transform=None):
     df = pd.read_csv(csv_file_path)
@@ -41,14 +83,14 @@ class Sensor():
     # loop for each entry of csv, first to last date
     while firstdate <= lastDate:
       print(firstdate)
-      zeros = np.zeros((1, config['resize_height'], config['resize_width'], 3))
+      zeros = np.zeros((1, config['resize_height'], config['resize_width'], 1))
       labels = np.array([], dtype=np.long)
       index = 0
       prev_sensor_values = ''
 
       self.h5Name = os.path.join(self.root_dir, 'h5py', firstdate.strftime('%d-%b-%Y') + '.h5')
       archive = h5py.File(self.h5Name, 'a')
-      archive.create_dataset('/images', data=np.empty((1, config['resize_height'], config['resize_width'], 3)), compression="gzip", chunks=True, maxshape=(None, None, None, None))
+      archive.create_dataset('/images', data=np.empty((1, config['resize_height'], config['resize_width'], 1)), compression="gzip", chunks=True, maxshape=(None, None, None, None))
 
       # Make a single file for each day
       while firstdate == self.getDate(self.csvFile.iloc[idx, 0]):
@@ -59,10 +101,10 @@ class Sensor():
 
         if prev_sensor_values != new_sensor_values:
           self.image_name = os.path.join(self.root_dir, 'AnnotatedImage', self.csvFile.iloc[idx, 0])
-          self.image = cv2.imread(self.image_name + '.png')
+          self.image = cv2.imread(self.image_name + '.png', 0)
           # self.sensorChannel = generateSensorChannelForTheMinute(self.jsonFile, self.csvFile.iloc[idx, 0], self.csvFile, self.width, self.height, self.channel)
 
-          self.image = self.image / 255
+          self.image = self.image
 
           self.image = np.expand_dims(self.image, axis= 0)
           # get label
@@ -76,7 +118,7 @@ class Sensor():
         if idx != 0:
           archive['images'].resize((archive["images"].shape[0] + zeros.shape[0]), axis=0)
 
-        archive['images'][-zeros.shape[0]:] = self.image
+        archive['images'][-zeros.shape[0]:] = np.expand_dims(self.image, axis=3)
 
         labels = np.append(labels, self.label)
         idx += 1

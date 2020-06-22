@@ -51,6 +51,7 @@ def create_inout_sequences(input_data, tw ):
     return inout_seq
 
 def train(file_name, input_dir, csv_file_path, json_file_path):
+    writer = SummaryWriter(os.path.join('../logs', file_name, 'cnn_lstm_small_img'))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     total_num_iteration_for_LOOCV = 0
@@ -59,14 +60,12 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
     avg_f1 = 0
 
     # Defining Model, Optimizer and Loss
-    model = Network()
+    model = Network().to(device)
 
     # Parallelize model to multiple GPUs
     if torch.cuda.device_count() > 1:
         print("Using", torch.cuda.device_count(), "GPUs!")
         model = nn.DataParallel(model)
-
-    model = model.to(device)
 
 
     print('cuda available: ', torch.cuda.is_available())
@@ -146,11 +145,11 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
             nb_classes = config['output_dim']
             confusion_matrix = torch.zeros(nb_classes, nb_classes)
             for i, (image, label) in enumerate(trainLoader):
-                print('batch: ',i)
+
                 image = image.float().to(device)
                 label = label.to(device)
                 optimizer.zero_grad()
-                print('label size is',label.size())
+
                 batch_size, timesteps, H, W, C = image.size()
                 # Change Image shape
                 image = image.view(batch_size * timesteps, H, W, C)
@@ -159,12 +158,16 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
                 output, (hn,cn) = model(image)
                 label = label.view(-1)
                 output = output.view(-1, output.size(2))
-                print(output.size(), label.size(0))
                 loss = criterion(output, label)
                 loss *= config['seq_dim']
                 loss.backward()  # Backward pass
                 optimizer.step()  # Now we can do an optimizer step
                 running_loss += loss.item()
+                if i % 200  == 0:
+                    print('batch: ', i)
+                    writer.add_scalar('Batch Loss', loss, i + 1)
+
+            writer.add_scalar('Epoch Loss', running_loss, epoch + 1)
 
             if epoch % 5 == 0:
                 save_checkpoint({
@@ -172,6 +175,7 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
                     'state_dict': model.state_dict(),
                     'optimizer': optimizer.state_dict(),
                 }, True)
+
                 correct = 0
                 total = 0
                 batches = 0
@@ -216,51 +220,13 @@ def train(file_name, input_dir, csv_file_path, json_file_path):
                         d[getClassnameFromID(i)] = per_class_acc[i]
                     # print(correct.cpu().item(), total)
                     accuracy = 100 * correct.cpu().item() / total
-                    print('\n\n ******** TRAIN ************** \n\n')
-                    print('Train Epoch: {}. train Loss: {}. train Accuracy: {}, f1 {}. train-pca: {}.'.format(epoch, running_loss, accuracy,f1, d))
+                    print('Train Epoch: {}. train running Loss: {}. train Accuracy: {}, f1 {}. train-pca: {}.'.format(epoch, running_loss, accuracy,f1, d))
 
-                    with torch.no_grad():
-                        for i, (image, label) in enumerate(testLoader):
-                            image = image.float().to(device)
-                            label = label.to(device)
-                            optimizer.zero_grad()
+                    writer.add_scalars('Mean_class_Accuracy', d, epoch + 1)
+                    writer.add_scalar('Train Accuracy', accuracy, epoch + 1)
+                    writer.add_scalar('Train Accuracy', f1, epoch + 1)
 
-                            batch_size, timesteps, H, W, C = image.size()
-                            # Change Image shape
-                            image = image.view(batch_size * timesteps, H, W, C)
-                            image = image.permute(0, 3, 1, 2)  # from NHWC to NCHW
-                            output, (hn, cn) = model(image)
 
-                            label = label.view(-1)
-                            output = output.view(-1, output.size(2))
-
-                            _, predicted = torch.max(output.data, 1)
-                            total += label.size(0)
-
-                            if torch.cuda.is_available():
-                                correct += (predicted.cpu() == label.cpu()).sum()
-                            else:
-                                correct += (predicted == label).sum()
-                            for t, p in zip(label.view(-1), predicted.view(-1)):
-                                confusion_matrix[t.long(), p.long()] += 1
-
-                            f1 += f1_score(label.cpu(), predicted.cpu(), average='macro')
-
-                            batches = i
-                        f1 = f1 / (batches + 1)
-                        per_class_acc = confusion_matrix.diag() / confusion_matrix.sum(1)
-                        per_class_acc = per_class_acc.cpu().numpy()
-                        per_class_acc[np.isnan(per_class_acc)] = 0
-                        d = {}
-                        for i in range(len(per_class_acc)):
-                            d[getClassnameFromID(i)] = per_class_acc[i]
-                        # print(correct.cpu().item(), total)
-                        accuracy = 100 * correct.cpu().item() / total
-                        print('\n\n ******** Test ************** \n\n')
-                        print('Test Epoch: {}. Test Loss: {}. Test Accuracy: {}, f1 {}, . Test-pca: {}.'.format(epoch,
-                                                                                                             running_loss,
-                                                                                                             accuracy, f1,
-                                                                                                             d))
 
         total_num_iteration_for_LOOCV += 1
         # print('\n\n ******** AVERAGE ************** \n\n')

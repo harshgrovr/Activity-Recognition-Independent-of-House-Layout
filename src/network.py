@@ -369,13 +369,11 @@ class Network(nn.Module):
                       kernel_size=kernel_size)
 
         self.net = nn.Sequential(b1, b2, b3, nn.AdaptiveMaxPool2d((2, 2)))
-
         self.apply(weight_init)
 
     def forward(self, x):
         x = self.net(x)
         x = x.view(config['batch_size'], config['seq_dim'], -1)
-        print(x.size())
         if self.lstm is None:
             self.lstm = nn.LSTM(x.size(2), config['hidden_dim'], 1, batch_first=True).to(self.device)
             for param in self.lstm.parameters():
