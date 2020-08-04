@@ -164,21 +164,19 @@ class datasetFolder(Dataset):
                                       key=lambda line: datetime.strptime(line.split(".png")[0], format))
             self.filesinCurrentFolder = [os.path.basename(i) for i in time_sorted_list]
 
-
-        self.image = self.filesinCurrentFolder[(id)% len(self.filesinCurrentFolder)]
-        self.label = self.labelsData[(id) % len(self.filesinCurrentFolder)][self.image.split('.png')[0]]
         for i in range(config['seq_dim']):
             self.image = self.filesinCurrentFolder[(id + i) % len(self.filesinCurrentFolder)]
             self.label = self.labelsData[(id + i) % len(self.filesinCurrentFolder)][self.image.split('.png')[0]]
-            # print(self.image, self.label)
-            self.image = cv2.imread(os.path.join(self.currentFolderPath, self.image), 0)
-            self.image = np.expand_dims(self.image, axis=2)
-            self.image = np.concatenate((self.image, self.objectChannel, self.sensorChannel), axis=2)
+            self.image = cv2.imread(os.path.join(self.currentFolderPath, self.image))
+            # self.image = np.expand_dims(self.image, axis=2)
+            # self.image = np.concatenate((self.image, self.objectChannel, self.sensorChannel), axis=2)
             self.labels.append(self.label)
             self.images.append(self.image)
 
         self.images = np.array(self.images)
         self.labels = np.array(self.labels)
+
+
 
         return self.images, self.labels
 

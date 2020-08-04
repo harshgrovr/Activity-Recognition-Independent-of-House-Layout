@@ -1,3 +1,4 @@
+import shutil
 
 import h5py
 import json
@@ -13,6 +14,7 @@ from config.config import config
 class Folder():
   def __init__(self, csv_file_path, json_file_path, root_dir, transform=None):
     df = pd.read_csv(csv_file_path)
+    df.drop_duplicates(subset=['start'], inplace=True)
     self.csvFile = df.iloc[:, :]
     with open(json_file_path) as f:
       d = json.load(f)
@@ -23,9 +25,9 @@ class Folder():
     self.height = config['image_height']
     self.channel = 1
     self.objectChannel = generateObjectChannels(self.jsonFile, self.width, self.height, self.channel)
-    cv2.imwrite('../data/houseB/images/objectChannel.png', self.objectChannel)
+    cv2.imwrite(os.path.join(self.root_dir, 'images', 'objectChannel.png'), self.objectChannel)
     self.sensorChannel = generateSensorChannel(self.jsonFile)
-    cv2.imwrite('../data/houseB/images/sensorChannel.png', self.sensorChannel)
+    cv2.imwrite(os.path.join(self.root_dir, 'images', 'sensorChannel.png'), self.sensorChannel)
     self.ActivityIdList = config['ActivityIdList']
 
   def getDate(self, start_datetime):
@@ -33,6 +35,11 @@ class Folder():
       start_datetime = datetime.strptime(start_datetime, '%d-%b-%Y %H:%M:%S')
     start_datetime = start_datetime.date()
     return start_datetime
+
+  def getIDFromClassName(self, train_label):
+    ActivityIdList = config['ActivityIdList']
+    train_label = [x for x in ActivityIdList if x["name"] == train_label]
+    return train_label[0]['id']
 
   def generateOffline(self):
     firstdate = self.getDate(self.csvFile.head(1).iloc[0, 0])
@@ -54,18 +61,29 @@ class Folder():
 
       # Make a single image for each minute
       while firstdate == self.getDate(self.csvFile.iloc[idx, 0]):
-        self.image_name = os.path.join(self.root_dir, 'AnnotatedImage', self.csvFile.iloc[idx, 0])
-        self.image = cv2.imread(self.image_name + '.png', 0)
+        self.image_name = os.path.join(self.root_dir, 'Sequence_AnnotatedImage', self.csvFile.iloc[idx, 0])
 
-        cv2.imwrite(os.path.join(self.folderName, self.csvFile.iloc[idx, 0]) + '.png', self.image)
+        activtyID = self.getIDFromClassName(self.csvFile.iloc[idx, 2])
+
+        if os.path.exists(self.image_name+'.png'):
+
+          shutil.copyfile(self.image_name+'.png', os.path.join(self.folderName, self.csvFile.iloc[idx, 0]) + '.png')
+
+          # self.image = cv2.imread(self.image_name + '.png', 0)
+          #
+          # cv2.imwrite(os.path.join(self.folderName, self.csvFile.iloc[idx, 0]) + '.png', self.image)
+
+
         # get label
-        label = self.csvFile.iloc[idx, 2]
+          label = self.csvFile.iloc[idx, 2]
         # Get label ID
-        label = [x for x in self.ActivityIdList if x["name"] == label]
-        self.label = {}
-        self.label[self.csvFile.iloc[idx, 0]] = label[0]['id']
+          label = [x for x in self.ActivityIdList if x["name"] == label]
+          self.label = {}
+          self.label[self.csvFile.iloc[idx, 0]] = label[0]['id']
 
-        labels = np.append(labels, self.label)
+          labels = np.append(labels, self.label)
+        else:
+          print(self.image_name + '.png')
         idx += 1
         index += 1
 

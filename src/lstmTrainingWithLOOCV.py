@@ -25,6 +25,7 @@ import torch.utils.tensorboard
 from config.config import config
 import os
 # give an index(date) start and end index
+
 def getStartAndEndIndex(df, test_index):
     # this line converts the string object in Timestamp object
     date = df['start'].iloc[test_index].item()
@@ -134,6 +135,7 @@ def getWeightedLoss(trainDataFrame):
     else:
         class_weights = torch.tensor(classFrequenciesList).float()
 
+
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     return criterion
 
@@ -145,6 +147,11 @@ def train(csv_file, ActivityIdList):
     confusion_matrix = np.zeros((config['output_dim'], config['output_dim']))
     # read csv File
     df = pd.read_csv(csv_file)
+
+    df = df[0:198147]
+
+    # df = df[0:10000]
+
     # Generate unique index for each day in csv
     uniqueIndex = getUniqueStartIndex(df)
 
@@ -155,6 +162,8 @@ def train(csv_file, ActivityIdList):
     total_num_iteration_for_LOOCV = len(uniqueIndex) - 1
     # Generate split over uniqueIndex and train and evaluate over it
     for train_index, test_index in loo.split(uniqueIndex):
+        if test_index == 0:
+            continue
         model = LSTM(config['input_dim'], config['hidden_dim'])
         if torch.cuda.is_available():
             model.cuda()
@@ -167,19 +176,20 @@ def train(csv_file, ActivityIdList):
         path = "../saved_model/lstm/model_best.pth.tar"
         start_epoch = 0
 
-        # # Load Saved Model if exists
-        if os.path.isfile(path):
-            print("=> loading checkpoint '{}'".format(path))
-            checkpoint = torch.load(path, map_location=torch.device('cpu'))
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            start_epoch += checkpoint['epoch']
-            print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(path, checkpoint['epoch']))
-        else:
-            print("=> no checkpoint found at '{}'".format(path))
+        # # # Load Saved Model if exists
+        # if os.path.isfile(path):
+        #     print("=> loading checkpoint '{}'".format(path))
+        #     checkpoint = torch.load(path, map_location=torch.device('cpu'))
+        #     model.load_state_dict(checkpoint['state_dict'])
+        #     optimizer.load_state_dict(checkpoint['optimizer'])
+        #     start_epoch += checkpoint['epoch']
+        #     print("=> loaded checkpoint '{}' (epoch {})"
+        #           .format(path, checkpoint['epoch']))
+        # else:
+        #     print("=> no checkpoint found at '{}'".format(path))
 
         # Get start and end of test dataset
+
         start, end = getStartAndEndIndex(df, uniqueIndex[test_index])
         # make dataframe for train, skip everything b/w test start and test end. rest everything is train.
 
@@ -218,9 +228,10 @@ def train(csv_file, ActivityIdList):
                                  drop_last=True)
 
 
+
         training(config['num_epochs'], trainLoader, optimizer, model, criterion, config['seq_dim'],
                  config['input_dim'], config['batch_size'],
-                 df, None, start_epoch, file_name, flag)
+                 df, testLoader, start_epoch, file_name, flag)
         per_class_accuracies = np.zeros(config['output_dim'])
         # Generate Test DataLoader
         if start - config['seq_dim'] > 0:
@@ -241,11 +252,12 @@ def train(csv_file, ActivityIdList):
             print('per class accuracy : ', np.divide(per_class_accuracies, np.array(total_num_iteration_for_LOOCV)))
             print('confusion matrix: ', np.divide(confusion_matrix, np.array(total_num_iteration_for_LOOCV)))
             print('avg accuracy: ', (accuracy / (total_num_iteration_for_LOOCV)))
-
+        break
+    total_num_iteration_for_LOOCV =1
 
 
     confusion_matrix *= np.array(total_num_iteration_for_LOOCV)
-    confusion_matrix /= total_num_iteration_for_LOOCV -3
+    confusion_matrix /= total_num_iteration_for_LOOCV
     confusion_matrix = confusion_matrix.astype(int)
     # print('avg score: ', (score / total_num_iteration_for_LOOCV))
     # print('per class accuracy : ', np.divide(per_class_accuracies, np.array(total_num_iteration_for_LOOCV)))
@@ -256,9 +268,9 @@ def train(csv_file, ActivityIdList):
 
     df_cm = pd.DataFrame(confusion_matrix, index=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])],
                          columns=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])], dtype=float)
-    plt.figure(figsize=(20, 20))
-    sn.heatmap(df_cm, annot=True)
-    plt.show()
+    # plt.figure(figsize=(20, 20))
+    # sn.heatmap(df_cm, annot=True)
+    # plt.show()
 
 
 def log_mean_class_accuracy(writer, per_class_accuracy, epoch, datasettype):
@@ -270,7 +282,6 @@ def log_mean_class_accuracy(writer, per_class_accuracy, epoch, datasettype):
     writer.add_scalars(datasettype + 'Mean_class_Accuracy', d, epoch + 1)
 
 
-
 # Train the Network
 def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, input_dim, batch_size, df, testLoader, start_epoch, file_name, flag):
 
@@ -280,6 +291,7 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
     writer = SummaryWriter(os.path.join('../logs', file_name, 'lstm'))
 
     for epoch in range(num_epochs):
+
         running_loss = 0
         print('epoch', epoch + start_epoch)
         # Get Start Index(Subset) for each of the activity and the minutes to run for
@@ -307,43 +319,48 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
             # Calculate Loss: softmax --> cross entropy loss
 
             loss = criterion(output, label)#weig pram
+
+            loss *= config['seq_dim']
             running_loss += loss
             loss.backward()  # Backward pass
             optimizer.step()  # Now we can do an optimizer stepx`
             optimizer.zero_grad()  # Reset gradients tensors
 
-        # if epoch % 10 == 0:
-        #     # accuracy, per_class_accuracy, trainLoss, f1, _ = evaluate(trainLoader, model, config['seq_dim'], config['input_dim'], config['batch_size'], criterion)
+
+
+        if epoch % 10 == 0:
+            accuracy, per_class_accuracy, trainLoss, f1, _ = evaluate(trainLoader, model, config['seq_dim'], config['input_dim'], config['batch_size'], criterion, train=True )
         #     # print('train loss is:',trainLoss)
-        #     # writer.add_scalar('train' + 'Accuracy', accuracy, epoch + start_epoch + 1)
-        #     # log_mean_class_accuracy(writer, per_class_accuracy, epoch + 1, datasettype='train')
-        #     # Loggin trainloss
-        #     # writer.add_scalar('train Loss', trainLoss, epoch + start_epoch+ 1)
-        #     # writer.add_scalar('train f1', f1, epoch + start_epoch + 1)
-        #
-        #     if flag != 0:
-        #         accuracy, per_class_accuracy, testLoss, f1,_ = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
-        #          config['batch_size'], criterion)
-        #
-        #         print('Test loss is:', testLoss)
-        #
-        #     # writer.add_scalar('test' + 'Accuracy', accuracy, epoch + start_epoch+ 1)
-        #     # log_mean_class_accuracy(writer, per_class_accuracy, epoch + start_epoch + 1, datasettype='test')
-        #     # # Loggin test loss
-        #     # writer.add_scalar('test Loss', testLoss, epoch + start_epoch+ 1)
-        #     #
-        #     # writer.add_scalar('test f1', f1, epoch + start_epoch + 1)
-        #     #
-        #     # save_checkpoint({
-        #     #     'epoch': epoch + 1,
-        #     #     'state_dict': model.state_dict(),
-        #     #     'optimizer': optimizer.state_dict(),
-        #     # }, True)
-        #
-        #     # for tag, value in model.named_parameters():
-        #     #     tag = tag.replace('.', '/')
-        #     #     # print(value.grad.data.cpu().numpy())
-        #     #     writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + start_epoch+ 1)
+            writer.add_scalar('train' + 'Accuracy', accuracy, epoch + start_epoch + 1)
+            log_mean_class_accuracy(writer, per_class_accuracy, epoch + 1, datasettype='train')
+
+            # Loggin trainloss
+            writer.add_scalar('train Loss', trainLoss, epoch + start_epoch+ 1)
+            writer.add_scalar('train f1', f1, epoch + start_epoch + 1)
+
+            if flag != 0:
+                accuracy, per_class_accuracy, testLoss, f1,_ = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
+                 config['batch_size'], criterion)
+
+                print('Test loss is:', testLoss)
+
+                writer.add_scalar('test' + 'Accuracy', accuracy, epoch + start_epoch+ 1)
+                log_mean_class_accuracy(writer, per_class_accuracy, epoch + start_epoch + 1, datasettype='test')
+                # Loggin test loss
+                writer.add_scalar('test Loss', testLoss, epoch + start_epoch+ 1)
+
+                writer.add_scalar('test f1', f1, epoch + start_epoch + 1)
+
+            save_checkpoint({
+                'epoch': epoch + 1,
+                'state_dict': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+            }, True)
+
+            for tag, value in model.named_parameters():
+                tag = tag.replace('.', '/')
+                # print(value.grad.data.cpu().numpy())
+                writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + start_epoch+ 1)
 
 
         print('%d loss: %.3f' %
@@ -352,7 +369,10 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
 
 
 # Evaluate the network
-def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
+def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion, train=False):
+    text = "test"
+    if train:
+        text = "train"
     # Initialize the prediction and label lists(tensors)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     running_loss = 0
@@ -384,7 +404,7 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
             running_loss += loss
             # Get predictions from the maximum value
             _, predicted = torch.max(output, 1)
-            f1 += f1_score(labels.cpu(), predicted.cpu(),average='weighted')
+            f1 += f1_score(labels.cpu(), predicted.cpu(),average='macro')
             # Total number of labels
             total += labels.size(0)
             # Total correct predictions
@@ -398,6 +418,9 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
                 # print(correct)
             for t, p in zip(labels.view(-1), predicted.view(-1)):
                 confusion_matrix[t.long(), p.long()] += 1
+
+
+    np.save('./' + text + '_confusion_matrix.npy', confusion_matrix)
 
     # print('F1 SCORE',f1/batches)
     f1 = f1/batches
@@ -422,6 +445,7 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion):
 
     accuracy = 100 * correct / total
 
+    print('\naccuracy is {} \n per_class_acc is: {} \n running_loss is {} \n f1 is {} \n '.format(accuracy, per_class_acc, running_loss, f1))
     # Print Accuracy
     # print('Accuracy: {}'.format(accuracy))
     return accuracy, per_class_acc, running_loss, f1, confusion_matrix

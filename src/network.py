@@ -268,8 +268,8 @@ class Residual(nn.Module):
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, X):
-        Y = F.relu(self.bn1(self.conv1(X)))
-        Y = self.bn2(self.conv2(Y))
+        Y = F.relu((self.conv1(X)))
+        Y = self.conv2(Y)
         if self.conv3:
             X = self.conv3(X)
         Y += X
@@ -354,26 +354,27 @@ class Network(nn.Module):
         padding = 4
         kernel_size = 5
         input_channel = 3
-        self.fc = nn.Linear(config['hidden_dim'], config['output_dim'])
+        self.fc = None
         self.lstm = None
 
         b1 = Residual(input_channels=input_channel, num_channels=num_channels,
                       use_1x1conv=True, strides=strides, dilation=dilation, padding=padding, kernel_size=kernel_size)
 
-        b2 = Residual(input_channels=num_channels, num_channels=2 * num_channels,
+        b2 = Residual(input_channels=num_channels, num_channels= num_channels,
                       use_1x1conv=True, strides=strides, dilation=2 * dilation, padding=2 * padding,
                       kernel_size=kernel_size)
 
-        b3 = Residual(input_channels=2 * num_channels, num_channels=4 * num_channels,
+        b3 = Residual(input_channels= num_channels, num_channels= num_channels,
                       use_1x1conv=True, strides=strides, dilation=4 * dilation, padding=4 * padding,
                       kernel_size=kernel_size)
 
-        self.net = nn.Sequential(b1, b2, b3, nn.AdaptiveMaxPool2d((2, 2)))
+        self.net = nn.Sequential(b1, b2, b3, nn.AdaptiveMaxPool2d((4, 4)))
         self.apply(weight_init)
 
     def forward(self, x):
         x = self.net(x)
         x = x.view(config['batch_size'], config['seq_dim'], -1)
+        print(x.size())
         if self.lstm is None:
             self.lstm = nn.LSTM(x.size(2), config['hidden_dim'], 1, batch_first=True).to(self.device)
             for param in self.lstm.parameters():
@@ -381,6 +382,7 @@ class Network(nn.Module):
                     init.orthogonal_(param.data)
                 else:
                     init.normal_(param.data)
+            self.fc = nn.Linear(config['hidden_dim'], config['output_dim']).to(self.device)
 
         h0 = torch.zeros(config['layer_dim'], x.size(0), config['hidden_dim']).to(self.device)
         # Initialize cell state
@@ -391,3 +393,68 @@ class Network(nn.Module):
         output = self.fc(output)
 
         return output, (hn, cn)
+
+
+class EncoderCNN(nn.Module):
+    def __init__(self, img_x=224, img_y=224, fc_hidden1=512, fc_hidden2=512, drop_p=0.3, CNN_embed_dim=300):
+        super(EncoderCNN, self).__init__()
+        self.img_x = img_x
+        self.img_y = img_y
+        self.CNN_embed_dim = CNN_embed_dim
+
+        # CNN architechtures
+        self.ch1, self.ch2, self.ch3, self.ch4 = 32, 64, 128, 256
+        self.k1, self.k2, self.k3, self.k4 = (5, 5), (3, 3), (3, 3), (3, 3)  # 2d kernal size
+        self.s1, self.s2, self.s3, self.s4 = (2, 2), (2, 2), (2, 2), (2, 2)  # 2d strides
+        self.pd1, self.pd2, self.pd3, self.pd4 = (0, 0), (0, 0), (0, 0), (0, 0)  # 2d padding
+
+
+        # fully connected layer hidden nodes
+        self.fc_hidden1, self.fc_hidden2 = fc_hidden1, fc_hidden2
+        self.drop_p = drop_p
+        self.relu = nn.ReLU()
+
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(in_channels=3, out_channels=self.ch1, kernel_size=self.k1, stride=self.s1, padding=self.pd1),
+            nn.BatchNorm2d(self.ch1, momentum=0.01),
+            nn.ReLU(inplace=True),
+            # nn.MaxPool2d(kernel_size=2),
+        )
+        # self.conv2 = nn.Sequential(
+        #     nn.Conv2d(in_channels=self.ch1, out_channels=self.ch2, kernel_size=self.k2, stride=self.s2,
+        #               padding=self.pd2),
+        #     nn.BatchNorm2d(self.ch2, momentum=0.01),
+        #     nn.ReLU(inplace=True),
+        #     # nn.MaxPool2d(kernel_size=2),
+        # )
+
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(in_channels=self.ch1, out_channels=self.ch1, kernel_size=self.k3, stride=self.s3,
+                      padding=self.pd3),
+            nn.BatchNorm2d(self.ch1, momentum=0.01),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2),
+        )
+
+        self.fc1 = nn.Linear(4928, 512)
+        self.fc2 = nn.Linear(512, 64)
+        self.fc3 = nn.Linear(64, config['output_dim'])
+
+        self.drop = nn.Dropout2d(self.drop_p)
+        self.pool = nn.MaxPool2d(2)
+
+    def forward(self, x_3d):
+
+        x = self.conv1(x_3d)
+
+        x = self.conv2(x)
+
+        x = x.view(x.size(0), -1)
+
+
+        x = self.fc3(self.relu(self.fc2(self.relu(self.fc1(x)))))
+
+        # cnn_embed_seq: shape=(batch, time_step, input_size)
+
+
+        return x
