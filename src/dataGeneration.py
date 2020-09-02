@@ -319,12 +319,13 @@ def annotateImage(filename, input_dir, minutesToGenrate = 100):
             k=1
         if end < index:
             i += 1
-            count =0
+            count = 0
             start, end = getStartAndEndIndex(df, uniqueIndex[i])
-            x = np.linspace(end - start, 0, end - start + 1)
-            z = 1 / (1 + np.exp(-x))
-            sensorValue = 22 * (1-z)
-            sensorValue = sensorValue[::-1]
+            # x = np.linspace(end - start, 0, end - start + 1)
+            # z = 1 / (1 + np.exp(-x))
+            # sensorValue = 22 * (1-z)
+            # sensorValue = sensorValue[::-1]
+            sensorValue = 55
 
 
         print('generating image file:',index)
@@ -332,8 +333,6 @@ def annotateImage(filename, input_dir, minutesToGenrate = 100):
         temp_image = np.array(temp_image)
         temp_image = cv2.resize(temp_image, (w, h),
                                 interpolation=cv2.INTER_AREA)
-
-
 
         activatedSensorNames = df.columns[df.iloc[index, :] == 1].tolist()
         temp_activatedSensorNames = activatedSensorNames.copy()
@@ -362,7 +361,8 @@ def annotateImage(filename, input_dir, minutesToGenrate = 100):
                     x1, y1 = dict['location']
 
                 x1, y1 = round(rw * x1),round(rh * y1)
-                cv2.circle(temp_image, (round(x1),round(y1)), 6, sensorValue[count], -1, lineType=cv2.LINE_AA)
+                # cv2.circle(temp_image, (round(x1),round(y1)), 6, sensorValue[count], -1, lineType=cv2.LINE_AA)
+                cv2.circle(temp_image, (round(x1), round(y1)), 6, sensorValue, -1, lineType=cv2.LINE_AA)
 
         # nonActivatedSensorNames = df.columns[df.iloc[index, :] == 0].tolist()
         # circleDict = sensorLocation(jsonFile, nonActivatedSensorNames)
@@ -397,14 +397,13 @@ def annotateImage(filename, input_dir, minutesToGenrate = 100):
             break
 
 
-def makeVideo(annoatedImageDir, fps = 5):
+def makeVideo(annoatedImageDir, fps = 10):
     img_array = []
     format = "%d-%b-%Y %H:%M:%S"
     currentFolderPath = annoatedImageDir
     filesinCurrentFolder = [name for name in os.listdir(currentFolderPath) if
                                  name.endswith('.png') and os.path.isfile(
                                      os.path.join(currentFolderPath, name))]
-
 
     time_sorted_list = sorted(filesinCurrentFolder,
                               key=lambda line: datetime.strptime(line.split(".png")[0], format))
@@ -574,7 +573,7 @@ def generateObjectChannels(jsonFile, width = config['image_width'], height = con
     outputChannel = []
     objectChannelDict = {}
     d = jsonFile
-    objectChannel =255* np.ones((h, w, channel), dtype=int)
+    objectChannel =255 * np.ones((h, w, channel), dtype=int)
     for object in d['baseImage']:
         if object['name'] == 'angleWall':
             continue
@@ -591,7 +590,6 @@ def generateObjectChannels(jsonFile, width = config['image_width'], height = con
     # objectChannel = objectChannel.astype('uint8')
     # objectChannel = cv2.resize(objectChannel, (config['resize_width'], config['resize_height']), interpolation=cv2.INTER_AREA)
     # objectChannel = np.expand_dims(objectChannel, axis= 2)
-
 
     cv2.imwrite("objectChannel.jpg", objectChannel )
 
@@ -635,7 +633,6 @@ def generateSeqData(input_dir, minutesToGenrate = 10000):
     filesinCurrentFolder = [os.path.basename(i) for i in time_sorted_list]
 
 
-
     image_array = []
     for id in range(len(filesinCurrentFolder) - config['seq_dim'] + 1):
         print('file is: ', filesinCurrentFolder[id])
@@ -660,6 +657,7 @@ if __name__ == "__main__":
 
         csv_file_path = os.path.join(input_dir, file_name + '.csv')
         json_file_path = os.path.join(input_dir, file_name + '.json')
+
         # csv_length = pd.read_csv(csv_file_path).shape[0]
         # print(csv_length)
         # sort the two Sensor and Activity data of JSON and replace the old JSON file
@@ -678,16 +676,16 @@ if __name__ == "__main__":
 
         # csv_length = 8000
 
-        # generateObjectChannels(f)
+        generateObjectChannels(f)
         # generateSensorChannel(f)
 
 
         # # Make a folder and save all the annotated Image per minute bases24-Jul-2009 20:21:00.png
-        # annotateImage(file_name,input_dir, minutesToGenrate = 10000)
+        annotateImage(file_name,input_dir, minutesToGenrate = 143132)
 
 
         # # Generate a video on above generated Image
-        # makeVideo(os.path.join(input_dir, 'AnnotatedImage'), fps=10)
+        # makeVideo(os.path.join(input_dir, 'Sequence_AnnotatedImage'), fps=10)
 
 
         # Generate H5 file for the images per day basic
@@ -695,7 +693,9 @@ if __name__ == "__main__":
         #                  transform=None)
 
         # # Generate Seq Data
-        # generateSeqData(input_dir, minutesToGenrate = 10000)
+        generateSeqData(input_dir, minutesToGenrate = 143132)
+
+        input("Press Enter to continue...")
 
 
         dataset = Folder(csv_file_path,json_file_path , root_dir=input_dir,

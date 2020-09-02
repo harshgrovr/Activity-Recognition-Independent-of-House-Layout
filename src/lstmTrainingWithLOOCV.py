@@ -67,7 +67,7 @@ def getClassnameFromID(train_label):
     return train_label[0]['name']
 
 # Create sequence of input and output depending upon the window size
-def create_inout_sequences(input_data, tw ):
+def create_inout_sequences(input_data, tw):
     inout_seq = []
     L = len(input_data)
     for i in range(L-tw):
@@ -127,7 +127,7 @@ def getWeightedLoss(trainDataFrame):
 
     # Sort it according to the class labels
     classFrequenciesList = np.array([value for key, value in sorted(temp_dict.items())])
-    classFrequenciesList = 1 / classFrequenciesList
+    classFrequenciesList = (1 / classFrequenciesList) * 1000
     classFrequenciesList[classFrequenciesList == np.inf] = 0
 
     if torch.cuda.is_available():
@@ -148,7 +148,9 @@ def train(csv_file, ActivityIdList):
     # read csv File
     df = pd.read_csv(csv_file)
 
-    df = df[0:198147]
+    # df = df[0:198147]
+
+    df = df[0:11700]
 
     # df = df[0:10000]
 
@@ -231,7 +233,7 @@ def train(csv_file, ActivityIdList):
 
         training(config['num_epochs'], trainLoader, optimizer, model, criterion, config['seq_dim'],
                  config['input_dim'], config['batch_size'],
-                 df, testLoader, start_epoch, file_name, flag)
+                 df, testLoader, start_epoch, file_name, flag, test_index)
         per_class_accuracies = np.zeros(config['output_dim'])
         # Generate Test DataLoader
         if start - config['seq_dim'] > 0:
@@ -252,8 +254,7 @@ def train(csv_file, ActivityIdList):
             print('per class accuracy : ', np.divide(per_class_accuracies, np.array(total_num_iteration_for_LOOCV)))
             print('confusion matrix: ', np.divide(confusion_matrix, np.array(total_num_iteration_for_LOOCV)))
             print('avg accuracy: ', (accuracy / (total_num_iteration_for_LOOCV)))
-        break
-    total_num_iteration_for_LOOCV =1
+    total_num_iteration_for_LOOCV = 1
 
 
     confusion_matrix *= np.array(total_num_iteration_for_LOOCV)
@@ -273,17 +274,17 @@ def train(csv_file, ActivityIdList):
     # plt.show()
 
 
-def log_mean_class_accuracy(writer, per_class_accuracy, epoch, datasettype):
+def log_mean_class_accuracy(writer, per_class_accuracy, epoch, test_index, datasettype):
     # Logging mean class accuracy
     d = {}
     for i in range(len(per_class_accuracy)):
         d[getClassnameFromID(i)] = per_class_accuracy[i]
 
-    writer.add_scalars(datasettype + 'Mean_class_Accuracy', d, epoch + 1)
+    writer.add_scalars(str(test_index) + datasettype + 'Mean_class_Accuracy', d, epoch + 1)
 
 
 # Train the Network
-def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, input_dim, batch_size, df, testLoader, start_epoch, file_name, flag):
+def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, input_dim, batch_size, df, testLoader, start_epoch, file_name, flag, test_index):
 
     # for each random run select the random point and minute to run for
     # do this for each random point
@@ -293,7 +294,7 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
     for epoch in range(num_epochs):
 
         running_loss = 0
-        print('epoch', epoch + start_epoch)
+        # print('epoch', epoch + start_epoch)
         # Get Start Index(Subset) for each of the activity and the minutes to run for
         for i, (input, label) in enumerate(trainLoader):
 
@@ -320,7 +321,6 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
 
             loss = criterion(output, label)#weig pram
 
-            loss *= config['seq_dim']
             running_loss += loss
             loss.backward()  # Backward pass
             optimizer.step()  # Now we can do an optimizer stepx`
@@ -331,25 +331,28 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
         if epoch % 10 == 0:
             accuracy, per_class_accuracy, trainLoss, f1, _ = evaluate(trainLoader, model, config['seq_dim'], config['input_dim'], config['batch_size'], criterion, train=True )
         #     # print('train loss is:',trainLoss)
-            writer.add_scalar('train' + 'Accuracy', accuracy, epoch + start_epoch + 1)
-            log_mean_class_accuracy(writer, per_class_accuracy, epoch + 1, datasettype='train')
+            print('\n\n train accuracy is {}. \n\n per_class_acc is {}. \n\n trainLoss is {}. \n\n train f1 is {}. \n\n'.format(accuracy, per_class_accuracy, trainLoss, f1))
+            writer.add_scalar(str(test_index) + 'train' + 'Accuracy' , accuracy, epoch + start_epoch + 1)
+            log_mean_class_accuracy(writer, per_class_accuracy, epoch + 1, test_index, datasettype='train')
 
             # Loggin trainloss
-            writer.add_scalar('train Loss', trainLoss, epoch + start_epoch+ 1)
-            writer.add_scalar('train f1', f1, epoch + start_epoch + 1)
+            writer.add_scalar(str(test_index) + 'train Loss', trainLoss, epoch + start_epoch+ 1)
+            writer.add_scalar(str(test_index) + 'train f1', f1, epoch + start_epoch + 1)
 
             if flag != 0:
                 accuracy, per_class_accuracy, testLoss, f1,_ = evaluate(testLoader, model, config['seq_dim'], config['input_dim'],
                  config['batch_size'], criterion)
 
-                print('Test loss is:', testLoss)
+                print('\n\n test accuracy is {}. \n\n per_class_acc is {}. \n\n testLoss is {}. \n\n test f1 is {}. \n\n'.format(accuracy, per_class_accuracy, testLoss, f1))
 
-                writer.add_scalar('test' + 'Accuracy', accuracy, epoch + start_epoch+ 1)
-                log_mean_class_accuracy(writer, per_class_accuracy, epoch + start_epoch + 1, datasettype='test')
+                print('\n\n --------------------------------------------------------------------------------------------\n\n')
+
+                writer.add_scalar(str(test_index) + 'test' + 'Accuracy', accuracy, epoch + start_epoch+ 1)
+                log_mean_class_accuracy(writer, per_class_accuracy, epoch + start_epoch + 1, test_index, datasettype='test')
                 # Loggin test loss
-                writer.add_scalar('test Loss', testLoss, epoch + start_epoch+ 1)
+                writer.add_scalar(str(test_index) + 'test Loss', testLoss, epoch + start_epoch+ 1)
 
-                writer.add_scalar('test f1', f1, epoch + start_epoch + 1)
+                writer.add_scalar(str(test_index) + 'test f1', f1, epoch + start_epoch + 1)
 
             save_checkpoint({
                 'epoch': epoch + 1,
@@ -363,8 +366,8 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
                 writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + start_epoch+ 1)
 
 
-        print('%d loss: %.3f' %
-              (epoch + 1,  running_loss))
+        # print('%d loss: %.3f' %
+        #       (epoch + 1,  running_loss))
         running_loss = 0
 
 
@@ -443,9 +446,8 @@ def evaluate(testLoader, model, seq_dim, input_dim, batch_size, criterion, train
     # sn.heatmap(df_cm, annot=True)
     # plt.show()
 
-    accuracy = 100 * correct / total
+    accuracy = 100 * correct.cpu().item() / total
 
-    print('\naccuracy is {} \n per_class_acc is: {} \n running_loss is {} \n f1 is {} \n '.format(accuracy, per_class_acc, running_loss, f1))
     # Print Accuracy
     # print('Accuracy: {}'.format(accuracy))
     return accuracy, per_class_acc, running_loss, f1, confusion_matrix

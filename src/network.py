@@ -396,7 +396,7 @@ class Network(nn.Module):
 
 
 class EncoderCNN(nn.Module):
-    def __init__(self, img_x=224, img_y=224, fc_hidden1=512, fc_hidden2=512, drop_p=0.3, CNN_embed_dim=300):
+    def __init__(self, img_x=224, img_y=224, fc_hidden1=512, fc_hidden2=512, drop_p=0.5, CNN_embed_dim=300):
         super(EncoderCNN, self).__init__()
         self.img_x = img_x
         self.img_y = img_y
@@ -415,7 +415,7 @@ class EncoderCNN(nn.Module):
         self.relu = nn.ReLU()
 
         self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels=3, out_channels=self.ch1, kernel_size=self.k1, stride=self.s1, padding=self.pd1),
+            nn.Conv2d(in_channels=1, out_channels=self.ch1, kernel_size=self.k2, padding=self.pd1),
             nn.BatchNorm2d(self.ch1, momentum=0.01),
             nn.ReLU(inplace=True),
             # nn.MaxPool2d(kernel_size=2),
@@ -429,14 +429,14 @@ class EncoderCNN(nn.Module):
         # )
 
         self.conv2 = nn.Sequential(
-            nn.Conv2d(in_channels=self.ch1, out_channels=self.ch1, kernel_size=self.k3, stride=self.s3,
-                      padding=self.pd3),
+            nn.Conv2d(in_channels=self.ch1, out_channels=self.ch1, kernel_size=self.k2,
+                      padding=self.pd1),
             nn.BatchNorm2d(self.ch1, momentum=0.01),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2),
         )
 
-        self.fc1 = nn.Linear(4928, 512)
+        self.fc1 = nn.Linear(85376, 512)
         self.fc2 = nn.Linear(512, 64)
         self.fc3 = nn.Linear(64, config['output_dim'])
 
@@ -446,15 +446,11 @@ class EncoderCNN(nn.Module):
     def forward(self, x_3d):
 
         x = self.conv1(x_3d)
-
         x = self.conv2(x)
-
         x = x.view(x.size(0), -1)
 
-
-        x = self.fc3(self.relu(self.fc2(self.relu(self.fc1(x)))))
-
+        x = F.dropout(self.relu(self.fc1(x)), p=self.drop_p)
+        x = F.dropout(self.relu(self.fc2(x)), p=self.drop_p)
+        x = self.fc3(x)
         # cnn_embed_seq: shape=(batch, time_step, input_size)
-
-
         return x

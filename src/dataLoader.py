@@ -106,6 +106,7 @@ class datasetFolder(Dataset):
         self.transform = transform
         self.length = 0
         self.index = 0
+
         self.count = 0
         self.foldersLength = []
         self.filesinCurrentFolder = []
@@ -166,17 +167,18 @@ class datasetFolder(Dataset):
 
         for i in range(config['seq_dim']):
             self.image = self.filesinCurrentFolder[(id + i) % len(self.filesinCurrentFolder)]
+            self.name = self.image.split('.png')[0]
             self.label = self.labelsData[(id + i) % len(self.filesinCurrentFolder)][self.image.split('.png')[0]]
-            self.image = cv2.imread(os.path.join(self.currentFolderPath, self.image))
+            self.image = cv2.imread(os.path.join(self.currentFolderPath, self.image), 0)
             # self.image = np.expand_dims(self.image, axis=2)
             # self.image = np.concatenate((self.image, self.objectChannel, self.sensorChannel), axis=2)
+            if self.transform:
+                self.image = self.transform(self.image)
             self.labels.append(self.label)
             self.images.append(self.image)
 
         self.images = np.array(self.images)
         self.labels = np.array(self.labels)
-
-
 
         return self.images, self.labels
 
