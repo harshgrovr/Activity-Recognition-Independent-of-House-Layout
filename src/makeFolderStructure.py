@@ -61,9 +61,9 @@ class Folder():
 
       # Make a single image for each minute
       while firstdate == self.getDate(self.csvFile.iloc[idx, 0]):
-        self.image_name = os.path.join(self.root_dir, 'Sequence_AnnotatedImage', self.csvFile.iloc[idx, 0])
+        self.image_name = os.path.join(self.root_dir, 'AnnotatedImage', self.csvFile.iloc[idx, 0])
 
-        activtyID = self.getIDFromClassName(self.csvFile.iloc[idx, 2])
+        # activtyID = self.getIDFromClassName(self.csvFile.iloc[idx, 2])
 
         if os.path.exists(self.image_name+'.png'):
 
