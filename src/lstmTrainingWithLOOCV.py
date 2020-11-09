@@ -128,7 +128,6 @@ def getWeightedLoss(trainDataFrame):
     for dict in ActivityIdList:
         temp_dict[dict['id']] = 0
 
-
     # make of classLabel and frequency
     for className, frequency in classFrequencyDict.items():
         classLabel = getIDFromClassName(className)
@@ -173,11 +172,15 @@ def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_pa
     compressed_csv_file['activity'] = compressed_csv_file['activity'].map(config['merging_activties']).fillna(
         compressed_csv_file['activity'])
 
+    # compressed_csv_file = compressed_csv_file.iloc[:,:-1]
+
     loo = LeaveOneOut()
     for train_index, test_index in loo.split(house_list):
 
         # Get test Decompressed CSV index
         test_index = test_index[0]
+        if test_index == 0:
+            continue
         test_start_Decompressed, test_end_Decompressed = config['decomprssed_house_start_end_dict'][house_name_list[test_index]]
 
         trainDfFramesIndex = []
@@ -227,8 +230,8 @@ def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_pa
         criterion = getWeightedLoss(trainDataFrame)
 
         # generate train, val and test sequence list based upon above dataframe.
-        trainDataseq = create_inout_sequences(trainDataFrame[0:500], config['seq_dim'])
-        valDataSeq = create_inout_sequences(valDataFrame[0:500], config['seq_dim'])
+        trainDataseq = create_inout_sequences(trainDataFrame, config['seq_dim'])
+        valDataSeq = create_inout_sequences(valDataFrame, config['seq_dim'])
         testDataSeq = create_inout_sequences(testDataFrame, config['seq_dim'])
 
         trainDataset = datasetCSV(trainDataseq, config['seq_dim'])
@@ -247,7 +250,7 @@ def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_pa
                                 num_workers=config['num_workers'],
                                 drop_last=True)
 
-        early_stopping = EarlyStopping(patience=10, verbose=True)
+        early_stopping = EarlyStopping(patience=15, verbose=True)
 
         training(config['num_epochs'], trainLoader, optimizer, model, criterion, config['seq_dim'],
                  config['input_dim'], config['batch_size'],
@@ -256,18 +259,19 @@ def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_pa
         test_loss, test_acc, test_f1_score, test_per_class_accuracy, test_confusion_matrix = eval_net(
             model, testLoader, criterion, config, text='test')
 
-        print(test_loss, test_acc, test_f1_score, test_per_class_accuracy)
+        print('testing on house: ', house_name_list[test_index])
+        print('test_loss: ',test_loss, '  test_acc: ',test_acc, '  test f1 score', test_f1_score, test_per_class_accuracy)
 
         house_name.append(house_name_list[test_index])
         all_test_loss.append(test_loss)
         all_test_acc.append(test_acc)
         all_test_f1_score.append(test_f1_score)
         all_test_per_class_accuracy.append(test_per_class_accuracy)
-        all_test_confusion_matrix.append(test_confusion_matrix)
+        all_test_confusion_matrix.append(test_confusion_matrix.detach().cpu().numpy())
         break
 
-    np.save('all_test_confusion_matrix.npy', all_test_confusion_matrix)
     np.save('all_test_per_mean_class_accuracy', all_test_per_class_accuracy)
+    np.save('all_test_confusion_matrix.npy', all_test_confusion_matrix)
 
 # per_class_accuracies = np.zeros(config['output_dim'])
 # # Generate Test DataLoader
@@ -322,6 +326,7 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
     for epoch in range(num_epochs):
         running_loss = 0
         for i, (input, label) in enumerate(trainLoader):
+
             input = input.view(-1, seq_dim, input_dim)
             if torch.cuda.is_available():
                 input = input.float().cuda()
@@ -329,6 +334,7 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
             else:
                 input = input.float()
                 label = label
+
             output, (hn,cn) = model((input))
             loss = criterion(output, label)#weig pram
             running_loss += loss
@@ -439,7 +445,7 @@ def eval_net(model, dataloader, criterion, config, text = 'train'):
     per_class_acc_dict = {}
     for i, entry in enumerate(per_class_acc):
         if entry != -1:
-            per_class_acc_dict[(i)] = entry
+            per_class_acc_dict[getClassnameFromID(i)] = entry
 
     f1 = f1_score(all_labels, all_predicted, average='macro')
 
@@ -459,8 +465,11 @@ if __name__ == "__main__":
 
         ob_csv_file_path =None
         decompressed_csv_path = None
+        if config['graph_embedding']:
+            ob_csv_file_path = os.path.join(input_dir, 'ob_graph_' + file_name + '.csv')
+            decompressed_csv_path = os.path.join(input_dir, 'decompressed_ob_graph_' + file_name + '.csv')
 
-        if config['ob_representation']:
+        elif config['ob_representation']:
             ob_csv_file_path = os.path.join(input_dir, 'ob_' + file_name + '.csv')
             decompressed_csv_path = os.path.join(input_dir, 'decompressed_OB_' + file_name + '.csv')
         ActivityIdList = config['ActivityIdList']
