@@ -179,8 +179,6 @@ def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_pa
 
         # Get test Decompressed CSV index
         test_index = test_index[0]
-        if test_index == 0:
-            continue
         test_start_Decompressed, test_end_Decompressed = config['decomprssed_house_start_end_dict'][house_name_list[test_index]]
 
         trainDfFramesIndex = []
