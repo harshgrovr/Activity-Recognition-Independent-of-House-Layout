@@ -26,11 +26,11 @@ class EarlyStopping:
         self.delta = delta
         self.path = path
         self.trace_func = trace_func
-    def __call__(self, val_f1, model, test_index):
+    def __call__(self, val_f1, model, test_index, epoch):
         score = val_f1
         if self.best_score is None:
             self.best_score = score
-            self.save_checkpoint(val_f1, model, test_index)
+            self.save_checkpoint(val_f1, model, test_index, epoch)
         elif score < self.best_score + self.delta:
             self.counter += 1
             self.trace_func('EarlyStopping counter: {} out of {}'.format(self.counter,  self.patience))
@@ -38,12 +38,13 @@ class EarlyStopping:
                 self.early_stop = True
         else:
             self.best_score = score
-            self.save_checkpoint(val_f1, model, test_index)
+            self.save_checkpoint(val_f1, model, test_index, epoch)
             self.counter = 0
 
-    def save_checkpoint(self, val_f1, model, test_index):
+    def save_checkpoint(self, val_f1, model, test_index, epoch):
         '''Saves model when val F1 increase.'''
+        print('\n epoch', epoch)
         if self.verbose:
             self.trace_func('Validation F1 Increased ({} --> {}).  Saving model ...'.format(self.val_loss_min, val_f1))
-        torch.save(model.state_dict(), 'checkpoint_'+test_index+'_.pt')
+        torch.save(model.state_dict(), 'checkpoint.pt')
         self.val_loss_min = val_f1

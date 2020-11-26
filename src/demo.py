@@ -80,8 +80,8 @@ def create_inout_sequences(input_data, tw):
     inout_seq = []
     L = len(input_data)
     for i in range(L-tw):
-        if i % 10000 == 0:
-            print('creating sequence')
+        # if i % 10000 == 0:
+        #     print('creating sequence')
         train_seq = input_data.iloc[i:i+tw, ~input_data.columns.isin(['activity', 'start', 'end'])]
         train_seq = train_seq.values
         train_label = input_data.iloc[i:i+tw, input_data.columns.isin(['activity'])]
@@ -151,7 +151,7 @@ def getWeightedLoss(trainDataFrame):
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     return criterion
 
-def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_path = None):
+def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_path = None, house = None):
     total_num_iteration_for_LOOCV = 0
     total_acc_for_LOOCV = []
     total_f1_for_LOOCV = []
@@ -253,14 +253,14 @@ def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_pa
         # Make Loaders for each
         trainLoader = DataLoader(trainDataset, batch_size=config['batch_size'], shuffle=False,
                                  num_workers=config['num_workers'],
-                                 drop_last=True)
+                                 drop_last=False)
         valLoader = DataLoader(valDataset, batch_size=config['batch_size'], shuffle=False,
                                 num_workers=config['num_workers'],
-                                drop_last=True)
+                                drop_last=False)
 
         testLoader = DataLoader(testDataset, batch_size=config['batch_size'], shuffle=False,
                                 num_workers=config['num_workers'],
-                                drop_last=True)
+                                drop_last=False)
 
         early_stopping = EarlyStopping(patience=15, verbose=True)
 
@@ -268,20 +268,52 @@ def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_pa
                  config['input_dim'], config['batch_size'],
                  df, valLoader, start_epoch, file_name, early_stopping)
 
-        test_loss, test_acc, test_f1_score, test_per_class_accuracy, test_confusion_matrix = eval_net(
-            model, testLoader, criterion, config, text='test')
+        # # Load Saved Model if exists
+        path = './checkpoint.pt'
+        if os.path.isfile(path):
+            print("=> loading checkpoint '{}'".format(path))
+            checkpoint = torch.load(path, map_location=torch.device('cpu'))
+            model.load_state_dict(checkpoint)
+            # optimizer.load_state_dict(checkpoint['optimizer'])
+            print("=> loaded checkpoint '{}'"
+                  .format(path))
+        else:
+            print("=> no checkpoint found at '{}'".format(path))
+
+        if len(testLoader) != 0:
+            test_loss, test_acc, test_f1_score, test_per_class_accuracy, test_confusion_matrix = eval_net(
+                model, testLoader, criterion, config, text='test')
+
+            total_acc_for_LOOCV.append(test_acc)
+            total_f1_for_LOOCV.append(test_f1_score)
+            total_per_class_accuracy.append(test_per_class_accuracy)
+            total_confusion_matrix.append(test_confusion_matrix)
 
 
-        total_acc_for_LOOCV.append(test_acc)
-        total_f1_for_LOOCV.append(test_f1_score)
-        total_per_class_accuracy.append(test_per_class_accuracy)
-        total_confusion_matrix.append(test_confusion_matrix)
-
-
-    print('test_acc:\t', np.mean(total_acc_for_LOOCV), '\t test f1 score', np.mean(total_f1_for_LOOCV),
+    house_results_dictionary = {}
+    print(house + '\n \n', 'test_acc:\t', np.mean(total_acc_for_LOOCV), '\t test f1 score', np.mean(total_f1_for_LOOCV),
           '\t test_per_class_accuracy: \n', dict(pd.DataFrame(total_per_class_accuracy).mean()))
 
-    np.save('ordonezA_confusion_matrix', dict(pd.DataFrame(total_confusion_matrix).mean()))
+    house_results_dictionary['accuracy'] = np.mean(total_acc_for_LOOCV)
+
+    house_results_dictionary['f1_score'] = np.mean(total_f1_for_LOOCV)
+
+    house_results_dictionary['test_per_class_accuracy'] = dict(pd.DataFrame(total_per_class_accuracy).mean())
+
+    house_results_dictionary['confusion_matrix'] = total_confusion_matrix
+
+    if not os.path.exists(os.path.join('../logs', house)):
+        os.mkdir(os.path.join('../logs', house))
+
+
+    if config['ob_data']:
+        np.save(os.path.join('../logs', house , house + 'ob_results_dict.npy'), house_results_dictionary)
+    else:
+        np.save(os.path.join('../logs', house, house + '_results_dict.npy'), house_results_dictionary)
+
+    print('\n\n\n\n\n\n Finished house', house, '\n\n\n\n')
+
+
 
 
 def log_mean_class_accuracy(writer, per_class_accuracy, epoch, test_index, datasettype):
@@ -325,27 +357,28 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
             valid_loss, valid_acc, val_f1_score, val_per_class_accuracy, val_confusion_matrix= eval_net(
                 model, valLoader, criterion, config, text='test')
 
-            print('\n epoch', epoch)
 
-            print('train set - average loss: {:.4f}, accuracy: {:.0f}%  train_f1_score: {:.4f} \n '
-                  .format(train_loss, 100. * train_acc, train_f1_score))
+
+
+            # print('train set - average loss: {:.4f}, accuracy: {:.0f}%  train_f1_score: {:.4f} \n '
+            #       .format(train_loss, 100. * train_acc, train_f1_score))
 
             # print('train per_class accuracy', train_per_class_accuracy)
 
-            print('\n valid set - average loss: {:.4f}, accuracy: {:.0f}% val_f1_score {:.4f}:  \n'
-                  .format(valid_loss, 100. * valid_acc, val_f1_score))
+            # print('\n valid set - average loss: {:.4f}, accuracy: {:.0f}% val_f1_score {:.4f}:  \n'
+            #       .format(valid_loss, 100. * valid_acc, val_f1_score))
 
             # print('Val per_class accuracy', val_per_class_accuracy)
 
-            print(
-                '\n\n --------------------------------------------------------------------------------------------\n\n')
+            # print(
+            #     '\n\n --------------------------------------------------------------------------------------------\n\n')
 
 
 
-        # early_stopping needs the validation F1 score to check if it has increased,
-        # and if it has, it will make a checkpoint of the current model
+            # early_stopping needs the validation F1 score to check if it has increased,
+            # and if it has, it will make a checkpoint of the current model
 
-            early_stopping(val_f1_score, model, str(0))
+            early_stopping(val_f1_score, model, str(0), epoch)
 
             if early_stopping.early_stop:
                 print("Early stopping")
@@ -395,6 +428,7 @@ def eval_net(model, dataloader, criterion, config, text = 'train'):
     # np.save('./' + text + '_confusion_matrix.npy', confusion_matrix)
 
     per_class_acc = confusion_matrix.diag() / confusion_matrix.sum(1)
+
     per_class_acc = per_class_acc.cpu().numpy()
     per_class_acc[np.isnan(per_class_acc)] = -1
     per_class_acc_dict = {}
@@ -406,10 +440,12 @@ def eval_net(model, dataloader, criterion, config, text = 'train'):
 
     loss, acc = total_loss / total, total_correct / total
 
+
     return loss, acc, f1, per_class_acc_dict, confusion_matrix
 
-def getParticularsOfEachHouse(csv_file_path):
 
+
+def getParticularsOfEachHouse(csv_file_path):
     df = pd.read_csv(csv_file_path)
     uniqueActivities = np.unique(df['activity'].values)
     output_dim = len(uniqueActivities)
@@ -421,13 +457,13 @@ def getParticularsOfEachHouse(csv_file_path):
         d['name'] = activity
         activity_dict_list.append(d)
 
-
     return input_dim, output_dim, activity_dict_list
 
 if __name__ == "__main__":
     if sys.argv[1] != None:
         house_name_list = ['ordonezB', 'houseB', 'houseC', 'houseA', 'ordonezA']
         for house in house_name_list:
+            print('starting with house ', house)
             file_name = sys.argv[1].split('.json')[0]
             input_dir = os.path.join(os.getcwd(), '../', 'data', file_name)
             csv_file_path = os.path.join(input_dir, file_name + '.csv')
@@ -436,13 +472,17 @@ if __name__ == "__main__":
             # csv_length = pd.read_csv(csv_file_path).shape[0]
             house_list = []
 
-            ob_csv_file_path = os.path.join(os.getcwd(), '../', 'data', house, 'ob_' + house + '.csv')
-            decompressed_csv_path = os.path.join(os.getcwd(), '../', 'data', house, 'ob_' + house + '.csv')
+            if config['ob_data']:
+                csv_file_path = os.path.join(os.getcwd(), '../', 'data', house, 'ob_' + house + '.csv')
+                decompressed_csv_path = os.path.join(os.getcwd(), '../', 'data', house, 'ob_' + house + '.csv')
+            else:
+                csv_file_path = os.path.join(os.getcwd(), '../', 'data', house, house + '.csv')
+                decompressed_csv_path = os.path.join(os.getcwd(), '../', 'data', house, house + '.csv')
 
-            config['input_dim'], config['output_dim'], config['ActivityIdList'] = getParticularsOfEachHouse(ob_csv_file_path)
+            config['input_dim'], config['output_dim'], config['ActivityIdList'] = getParticularsOfEachHouse(csv_file_path)
 
             ActivityIdList = config['ActivityIdList']
-            train(csv_file_path, ActivityIdList, ob_csv_file_path, decompressed_csv_path)
+            train(csv_file_path, ActivityIdList, csv_file_path, decompressed_csv_path, house)
 
 
 
