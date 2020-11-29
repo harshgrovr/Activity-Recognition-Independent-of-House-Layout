@@ -76,8 +76,8 @@ def create_inout_sequences(input_data, tw):
     inout_seq = []
     L = len(input_data)
     for i in range(L-tw):
-        if i % 10000 == 0:
-            print('creating sequence')
+        # if i % 10000 == 0:
+        #     print('creating sequence')
         train_seq = input_data.iloc[i:i+tw, ~input_data.columns.isin(['activity', 'start', 'end'])]
         train_seq = train_seq.values
         train_label = input_data.iloc[i:i+tw, input_data.columns.isin(['activity'])]
@@ -147,15 +147,16 @@ def getWeightedLoss(trainDataFrame):
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     return criterion
 
-def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_path = None):
+def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_path = None, run_configuration = None):
     total_num_iteration_for_LOOCV = 0
     total_acc_for_LOOCV = 0
+    house_results_dictionary = {}
     score = 0
     accuracy = 0
     confusion_matrix = np.zeros((config['output_dim'], config['output_dim']))
     df = None
     # read csv Files
-    house_name, all_test_loss, all_test_acc, all_test_f1_score, all_test_per_class_accuracy, all_test_confusion_matrix = [], [], [], [], [], []
+    house_name, all_house_dict_list  = [], []
 
 
     house_name_list = ['ordonezB', 'houseB', 'houseC', 'houseA', 'ordonezA']
@@ -171,13 +172,16 @@ def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_pa
     # compressed_csv_file = compressed_csv_file.iloc[:,:-1]
 
     loo = LeaveOneOut()
+    # Split on which house should be test and which should be train
     for train_index, test_index in loo.split(house_name_list):
+        test_index = test_index[0]
+        print('----------------------------------------------------------------------------------------------')
+        print('\n\n Test House: ', house_name_list[test_index])
 
         # Get test Decompressed CSV index
-        test_index = test_index[0]
-        test_start_Decompressed, test_end_Decompressed = config['decomprssed_house_start_end_dict'][house_name_list[test_index]]
+        test_start_Decompressed, test_end_Decompressed = config['decompressed_house_start_end_dict'][house_name_list[test_index]]
 
-        trainDfFramesIndex = []
+        valDfFramesIndex = []
         valDfFrames = []
         # Make val dataframe excluding the house
         for key, val in config['house_start_end_dict'].items():
@@ -185,11 +189,20 @@ def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_pa
                 continue
             start, end = val
             valDfFrames.append(compressed_csv_file[start: end])
-            trainDfFramesIndex.extend(np.arange(start, end))
+            valDfFramesIndex.extend(np.arange(start, end))
 
-        testDFFrameIndex = np.arange(test_start_Decompressed, test_end_Decompressed)
 
-        trainDfFramesIndex = list(set(np.arange(len(compressed_csv_file))) - set(trainDfFramesIndex) - set(testDFFrameIndex))
+        if config['master_ob_DeCompressed_representation']:
+            # compressed_house_start_end_index
+            test_start_compressed, test_end_compressed = config['compressed_house_start_end_index'][house_name_list[test_index]]
+            testDFFrameIndex = np.arange(test_start_compressed, test_end_compressed)
+            trainDfFramesIndex = list(set(np.arange(len(compressed_csv_file))) - set(valDfFramesIndex) - set(testDFFrameIndex))
+
+        else:
+            testDFFrameIndex = np.arange(test_start_Decompressed, test_end_Decompressed)
+            trainDfFramesIndex = list(set(np.arange(len(compressed_csv_file))) - set(valDfFramesIndex) - set(testDFFrameIndex))
+
+
 
         # Train, Val, Test Data frame for current split
         trainDataFrame = compressed_csv_file.iloc[trainDfFramesIndex]
@@ -211,16 +224,6 @@ def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_pa
         path = "../saved_model/lstm/model_best.pth"
         start_epoch = 0
 
-        # # Load Saved Model if exists
-        if os.path.isfile(path):
-            print("=> loading checkpoint '{}'".format(path))
-            checkpoint = torch.load(path, map_location=torch.device('cpu'))
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}'"
-                  .format(path))
-        else:
-            print("=> no checkpoint found at '{}'".format(path))
 
         # get Weighted Loss
         criterion = getWeightedLoss(trainDataFrame)
@@ -252,57 +255,45 @@ def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_pa
                  config['input_dim'], config['batch_size'],
                  df, valLoader, start_epoch, file_name, test_index, early_stopping)
 
-        test_loss, test_acc, test_f1_score, test_per_class_accuracy, test_confusion_matrix = eval_net(
-            model, testLoader, criterion, config, text='test')
+        # Load Best Model from early stopping
+        path = './checkpoint_lstmTrainingWithLOOCV.pt'
+        if os.path.isfile(path):
+            print("=> loading checkpoint '{}'".format(path))
+            checkpoint = torch.load(path, map_location=torch.device('cpu'))
+            model.load_state_dict(checkpoint)
+            print("=> loaded checkpoint '{}'"
+                  .format(path))
+        else:
+            print("=> no checkpoint found at '{}'".format(path))
 
-        print('testing on house: ', house_name_list[test_index])
-        print('test_loss: ',test_loss, '  test_acc: ',test_acc, '  test f1 score', test_f1_score, test_per_class_accuracy)
+        if len(testLoader) != 0:
+            test_loss, test_acc, test_f1_score, test_per_class_accuracy, test_confusion_matrix = eval_net(
+                    model, testLoader, criterion, config, text='test')
 
-        house_name.append(house_name_list[test_index])
-        all_test_loss.append(test_loss)
-        all_test_acc.append(test_acc)
-        all_test_f1_score.append(test_f1_score)
-        all_test_per_class_accuracy.append(test_per_class_accuracy)
-        all_test_confusion_matrix.append(test_confusion_matrix.detach().cpu().numpy())
-        break
+            print('\n\n\n\n', 'testing on house: ', house_name_list[test_index], '\n\n\n\n')
+            print('test_loss: ', test_loss, '  test_acc: ',test_acc, '  test f1 score', test_f1_score, test_per_class_accuracy)
+            house_dict = {}
+            house_dict['house_name'] = house_name_list[test_index]
+            house_dict['test_loss'] = test_loss
+            house_dict['test_acc'] = test_acc
+            house_dict['test_f1_score'] = test_f1_score
+            house_dict['test_per_class_accuracy'] = test_per_class_accuracy
+            house_dict['test_per_class_accuracy'] = test_confusion_matrix
+            all_house_dict_list.append(house_dict)
 
-    np.save('all_test_per_mean_class_accuracy', all_test_per_class_accuracy)
-    np.save('all_test_confusion_matrix.npy', all_test_confusion_matrix)
+        # print(test_house_name + '\n \n', 'test_acc:\t', np.mean(all_test_acc), '\t test f1 score', np.mean(all_test_f1_score),
+        #       '\t test_per_class_accuracy: \n', dict(pd.DataFrame(all_test_per_class_accuracy).mean()))
 
-# per_class_accuracies = np.zeros(config['output_dim'])
-# # Generate Test DataLoader
-# print('Results')
-#
-# mean_score = np.mean(all_val_f1_score)
-# # confusion_matrix += np.array(matrix)
-# mean_accuracy = np.mean(all_val_acc)
-# per_class_accuracies = np.array(all_val_per_class_accuracy)
-# mean_per_class_accuracy = np.divide(per_class_accuracies, np.array(total_num_iteration_for_LOOCV))
+    # Make Directory if it does not exists
+    if not os.path.exists(os.path.join('../logs', 'master')):
+        os.makedirs(os.path.join('../logs',  'master'))
 
-# print('avg F1 score: ', mean_score)
-# print('avg accuracy: ', mean_accuracy)
+    # Save the results, according to the configuration
+    if config['master_ob_DeCompressed_representation']:
+       np.save(os.path.join('../logs', 'master', run_configuration + '_master_ob_all_house_dicts.npy'), all_house_dict_list)
 
-# print('mean per class accuracy : ', mean_per_class_accuracy)
-# print('confusion matrix: ', np.divide(confusion_matrix, np.array(total_num_iteration_for_LOOCV)))
-
-# total_num_iteration_for_LOOCV += 1
-
-
-# confusion_matrix *= np.array(total_num_iteration_for_LOOCV)
-# confusion_matrix /= total_num_iteration_for_LOOCV
-# confusion_matrix = confusion_matrix.astype(int)
-# print('avg score: ', (score / total_num_iteration_for_LOOCV))
-# print('per class accuracy : ', np.divide(per_class_accuracies, np.array(total_num_iteration_for_LOOCV)))
-# print('confusion matrix: ', np.divide(confusion_matrix , np.array(total_num_iteration_for_LOOCV)))
-# print('avg accuracy: ', (accuracy / (total_num_iteration_for_LOOCV)))
-
-# pd.isnull(np.array([np.nan, -1], dtype=float))
-#
-# df_cm = pd.DataFrame(confusion_matrix, index=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])],
-#                      columns=[getClassnameFromID(i) for i in range(confusion_matrix.shape[0])], dtype=float)
-# plt.figure(figsize=(20, 20))
-# sn.heatmap(df_cm, annot=True)
-# plt.show()
+    elif config['master_raw_representation']:
+        np.save(os.path.join('../logs',  'master', run_configuration + '_master_raw_all_house_dicts.npy'), all_house_dict_list)
 
 
 def log_mean_class_accuracy(writer, per_class_accuracy, epoch, test_index, datasettype):
@@ -356,8 +347,6 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
 
             # print('Val per_class accuracy', val_per_class_accuracy)
 
-            print(
-                '\n\n --------------------------------------------------------------------------------------------\n\n')
 
             # Train Logging
             writer.add_scalar(str(test_index) + 'train' + 'f1' , train_acc, epoch + start_epoch + 1)
@@ -377,15 +366,11 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
             #     'optimizer': optimizer.state_dict(),
             # }, True)
 
-            # for tag, value in model.named_parameters():
-            #     tag = tag.replace('.', '/')
-            #     # print(value.grad.data.cpu().numpy())
-            #     writer.add_histogram(tag + '/grad', value.grad.data.cpu().numpy(), epoch + start_epoch+ 1)
 
         # early_stopping needs the validation F1 score to check if it has increased,
         # and if it has, it will make a checkpoint of the current model
 
-            early_stopping(val_f1_score, model, str(test_index))
+            early_stopping(val_f1_score, model, str(test_index), epoch)
 
             if early_stopping.early_stop:
                 print("Early stopping")
@@ -460,59 +445,75 @@ if __name__ == "__main__":
         house_list = []
         ob_csv_file_path =None
         decompressed_csv_path = None
-        if config['graph_embedding_ob']:
-            ob_csv_file_path = os.path.join(input_dir, 'ob_graph_' + file_name + '.csv')
-            decompressed_csv_path = os.path.join(input_dir, 'decompressed_ob_graph_' + file_name + '.csv')
-            config['input_dim'] = 64
-            config['house_start_end_dict'] = {'ordonezB': (767, 892), 'houseB': (4039, 4058), 'houseC': (4636, 4645), 'houseA': (7254, 7267), 'ordonezA': (8429, 8453)}
-            config["decomprssed_house_start_end_dict"] = {'ordonezB': (0, 30470), 'houseB': (30470, 51052),
-                                                          'houseC': (51052, 77539), 'houseA': (77539, 114626),
-                                                          'ordonezA': (114626, 134501)}
+        config["decompressed_house_start_end_dict"] = {'ordonezB': (0, 30470), 'houseB': (30470, 51052),
+                                                       'houseC': (51052, 77539), 'houseA': (77539, 114626),
+                                                       'ordonezA': (114626, 134501)}
 
-        elif config['graph_embedding_raw']:
-            # Both involves involves raw embeddings
-            ob_csv_file_path = os.path.join(input_dir, 'raw_graph_embeddings_train' + '.csv')
-            decompressed_csv_path = os.path.join(input_dir, 'raw_graph_embeddings_train' + '.csv')
-            config['input_dim'] = 64
-            config['house_start_end_dict'] = {'ordonezB': (8806, 10246), 'houseB': (33784, 35224), 'houseC': (51052, 51123), 'houseA': (77539, 78960), 'ordonezA': (114626, 115919)}
-            config["decomprssed_house_start_end_dict"] = {'ordonezB': (0, 30470), 'houseB': (30470, 51052), 'houseC': (51052, 77539), 'houseA': (77539, 114626), 'ordonezA': (114626, 134501)}
+        run_time_configs = ['master_ob_Compressed_representation', 'master_ob_DeCompressed_representation', 'master_raw_representation']
+        for run_configuration in run_time_configs:
+            print('\n\n\n\nRunning configuration', run_configuration, '\n\n\n\n')
 
-        elif config['master_ob_representation']:
-            ob_csv_file_path = os.path.join(input_dir, 'ob_' + file_name + '.csv')
-            decompressed_csv_path = os.path.join(input_dir, 'decompressed_OB_' + file_name + '.csv')
-            config['input_dim'] = 79
-            config['house_start_end_dict'] = {'ordonezB': (767, 892), 'houseB': (4039, 4058), 'houseC': (4636, 4645), 'houseA': (7254, 7267),
-                                              'ordonezA': (8429, 8453)}
+            if run_configuration is 'master_raw_representation':
+                config['master_raw_representation'] = True
+                config['master_ob_Compressed_representation'] = False
+                config['master_ob_DeCompressed_representation'] = False
 
-            config["decomprssed_house_start_end_dict"] = {'ordonezB': (0, 30470), 'houseB': (30470, 51052),
-                                                          'houseC': (51052, 77539), 'houseA': (77539, 114626),
-                                                          'ordonezA': (114626, 134501) }
+            if run_configuration is 'master_ob_DeCompressed_representation':
+                config['master_raw_representation'] = False
+                config['master_ob_Compressed_representation'] = False
+                config['master_ob_DeCompressed_representation'] = True
 
-        elif config['master_raw_representation']:
-            ob_csv_file_path = os.path.join(input_dir, file_name + '.csv')
-            decompressed_csv_path = os.path.join(input_dir, file_name + '.csv')
-            config['input_dim'] = 48
-            config['house_start_end_dict'] = {'ordonezB': (8806, 10246), 'houseB': (33784, 35224), 'houseC': (51052, 51123), 'houseA': (77539, 78960), 'ordonezA': (114626, 115919)}
+            if run_configuration is 'master_ob_Compressed_representation':
+                config['master_raw_representation'] = False
+                config['master_ob_Compressed_representation'] = True
+                config['master_ob_DeCompressed_representation'] = False
 
-            config["decomprssed_house_start_end_dict"] = {'ordonezB': (0, 30470), 'houseB': (30470, 51052),
-                                                          'houseC': (51052, 77539), 'houseA': (77539, 114626),
-                                                          'ordonezA': (114626, 134501)}
 
-        elif config['ob_single_house']:
-            ob_csv_file_path = os.path.join(os.getcwd(), '../', 'data', 'houseA', 'ob_houseA.csv')
-            decompressed_csv_path = os.path.join(os.getcwd(), '../', 'data', 'houseA', 'ob_houseA.csv')
-            config['input_dim'] = 47
-            config['house_start_end_dict'] = {'ordonezB': (8806, 10246), 'houseB': (33784, 35224),
-                                              'houseC': (51052, 51123), 'houseA': (77539, 78960),
-                                              'ordonezA': (114626, 115919)}
+            if config['graph_embedding_ob']:
+                ob_csv_file_path = os.path.join(input_dir, 'ob_graph_' + file_name + '.csv')
+                decompressed_csv_path = os.path.join(input_dir, 'decompressed_ob_graph_' + file_name + '.csv')
+                config['input_dim'] = 64
+                config['house_start_end_dict'] = {'ordonezB': (767, 892), 'houseB': (4039, 4058), 'houseC': (4636, 4645), 'houseA': (7254, 7267), 'ordonezA': (8429, 8453)}
 
-            config["decomprssed_house_start_end_dict"] = {'ordonezB': (0, 30470), 'houseB': (30470, 51052),
-                                                          'houseC': (51052, 77539), 'houseA': (77539, 114626),
-                                                          'ordonezA': (114626, 134501)}
+            elif config['graph_embedding_raw']:
+                # Both involves involves raw embeddings
+                ob_csv_file_path = os.path.join(input_dir, 'raw_graph_embeddings_train' + '.csv')
+                decompressed_csv_path = os.path.join(input_dir, 'raw_graph_embeddings_train' + '.csv')
+                config['input_dim'] = 64
+                config['house_start_end_dict'] = {'ordonezB': (8806, 10246), 'houseB': (33784, 35224), 'houseC': (51052, 51123), 'houseA': (77539, 78960), 'ordonezA': (114626, 115919)}
 
-        # Master
-        ActivityIdList = config['ActivityIdList']
-        train(csv_file_path, ActivityIdList, ob_csv_file_path, decompressed_csv_path)
+            elif config['master_ob_DeCompressed_representation']:
+                ob_csv_file_path = os.path.join(input_dir, 'ob_' + file_name + '.csv')
+                decompressed_csv_path = os.path.join(input_dir, 'decompressed_OB_' + file_name + '.csv')
+                config['input_dim'] = 80
+                config['house_start_end_dict'] = {'ordonezB': (767, 892), 'houseB': (4039, 4058), 'houseC': (4636, 4645), 'houseA': (7254, 7267),
+                                                  'ordonezA': (8429, 8453)}
+
+                config["compressed_house_start_end_index"] = {'ordonezB': (0, 2487), 'houseB': (2487, 4636),
+                                                               'houseC': (4636, 6954), 'houseA': (6954, 7989),
+                                                               'ordonezA': (7989, 8557)}
+
+            elif config['master_ob_Compressed_representation']:
+                ob_csv_file_path = os.path.join(input_dir, 'ob_' + file_name + '.csv')
+                decompressed_csv_path = os.path.join(input_dir, 'ob_' + file_name + '.csv')
+                config['input_dim'] = 80
+                config['house_start_end_dict'] = {'ordonezB': (767, 892), 'houseB': (4039, 4058),
+                                                  'houseC': (4636, 4645), 'houseA': (7254, 7267),
+                                                  'ordonezA': (8429, 8453)}
+
+                config["decompressed_house_start_end_dict"] = {'ordonezB': (0, 2487), 'houseB': (2487, 4636),
+                                                               'houseC': (4636, 6954),'houseA': (6954, 7989),
+                                                               'ordonezA': (7989, 8557)}
+
+            elif config['master_raw_representation']:
+                ob_csv_file_path = os.path.join(input_dir, file_name + '.csv')
+                decompressed_csv_path = os.path.join(input_dir, file_name + '.csv')
+                config['input_dim'] = 48
+                config['house_start_end_dict'] = {'ordonezB': (8806, 10246), 'houseB': (33784, 35224), 'houseC': (51052, 51123), 'houseA': (77539, 78960), 'ordonezA': (114626, 115919)}
+
+            # Master
+            ActivityIdList = config['ActivityIdList']
+            train(csv_file_path, ActivityIdList, ob_csv_file_path, decompressed_csv_path, run_configuration)
 
 
 

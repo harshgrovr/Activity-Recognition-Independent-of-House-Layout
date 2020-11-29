@@ -1,17 +1,18 @@
 #!/usr/bin/env python
 
 # "input_dim" : 79,
+# "input_dim" : 64,
+
 config = {
 "learning_rate" : 0.0001,
-"num_epochs" : 30,
+"num_epochs" : 500,
 "decay" : 1e-5,
-"input_dim" : 64,
 "hidden_dim" : 64,
 "layer_dim" : 1,
 "output_dim" : 15,
 "seq_dim" : 2,
 "batch_size" :32,
-"split_ratio" : 0.5,
+"split_ratio" : 0.2,
 "num_workers":4,
 "accumulation_steps": 1,
 "no_of_subset":30 ,
@@ -58,15 +59,13 @@ config = {
         "Idle": "idle",
         "watchTV": "relaxing"
     },
- "ob_representation": True,
- "leaveOneHouseOut": False,
- "house_start_end_dict" : {'ordonezB': (767, 892), 'houseB': (4015, 4033), 'houseC': (4610, 4619), 'houseA': (7228, 7241), 'ordonezA': (8403, 8427)},
- "graph_embedding": True,
-
- "decomprssed_house_start_end_dict": {'ordonezB': (0, 30470),
-     'houseB': (30470, 51052),
-     'houseC': (51052, 77539),
-     'houseA': (77539, 114626),
-     'ordonezA': (114626, 134501)}
-
+"graph_embedding_ob": False,
+"graph_embedding_raw": False,
+"master_raw_representation": False,
+"master_ob_DeCompressed_representation": False,
+"master_ob_Compressed_representation": False,
+"raw_data": False,
+"ob_data_compressed": False,
+"ob_data_Decompressed": False
 }
+

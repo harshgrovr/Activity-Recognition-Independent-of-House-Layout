@@ -151,7 +151,7 @@ def getWeightedLoss(trainDataFrame):
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     return criterion
 
-def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_path = None, house = None):
+def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_path = None, house = None, run_configuration=None):
     total_num_iteration_for_LOOCV = 0
     total_acc_for_LOOCV = []
     total_f1_for_LOOCV = []
@@ -164,52 +164,40 @@ def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_pa
     df = None
     # read csv Files
     house_name, all_test_loss, all_test_acc, all_test_f1_score, all_test_per_class_accuracy, all_test_confusion_matrix = [], [], [], [], [], []
-
-
     house_name_list = ['ordonezB', 'houseB', 'houseC', 'houseA', 'ordonezA']
     decompressed_csv = pd.read_csv(decompressed_csv_path)
-    compressed_csv_file = pd.read_csv(ob_csv_file_path)
 
-    uniqueIndex = getUniqueStartIndex(decompressed_csv)
+    compressed_csv = pd.read_csv(ob_csv_file_path)
+
+    uniqueIndex = getUniqueStartIndex(compressed_csv)
 
     # Mapped Activity as per the config/generalizing the activities not present in all csvs'
-
-    # compressed_csv_file = compressed_csv_file.iloc[:,:-1]
 
     loo = LeaveOneOut()
 
     for train_index, test_index in loo.split(uniqueIndex):
-        print('split: ', total_num_iteration_for_LOOCV)
+        print('----------------------------------------------------------------------------------------------')
+        print('\n\n split: ', total_num_iteration_for_LOOCV)
         total_num_iteration_for_LOOCV += 1
-        df = decompressed_csv
+
         # Get start and end of test dataset
-        start, end = getStartAndEndIndex(decompressed_csv, uniqueIndex[test_index])
+        start, end = getStartAndEndIndex(compressed_csv, uniqueIndex[test_index])
         # make dataframe for train, skip everything b/w test start and test end. rest everything is train.
-        dfFrames = [df[:start], df[end:]]
+        dfFrames = [compressed_csv[:start], compressed_csv[end:]]
         trainDataFrame = pd.concat(dfFrames)
 
         # Divide train, test and val dataframe
         valDataFrame = trainDataFrame[:int(len(trainDataFrame) * config['split_ratio'])]
         trainDataFrame = trainDataFrame[int(len(trainDataFrame) * config['split_ratio']):]
-        testDataFrame = df[start:end]
 
-        # # Get test Decompressed CSV index
-        # test_start_Decompressed, test_end_Decompressed = 967, 1036
-        #
-        # trainDfFramesIndex = []
-        # valDfFrames = []
-        # # Make val dataframe excluding the house
-        #
-        # valDfFrames.append(compressed_csv_file[132: 281])
-        #
-        # testDFFrameIndex = np.arange(test_start_Decompressed, test_end_Decompressed)
-        #
-        # trainDfFramesIndex = list(set(np.arange(len(compressed_csv_file))) - set(trainDfFramesIndex) - set(testDFFrameIndex))
-        #
-        # # Train, Val, Test Data frame for current split
-        # trainDataFrame = compressed_csv_file.iloc[trainDfFramesIndex]
-        # valDataFrame = pd.concat(valDfFrames)
-        # testDataFrame = decompressed_csv.iloc[test_start_Decompressed: test_end_Decompressed]
+        # Only Test index will be picked from decompressed brcause
+        # Only while evaluating we are decompressing
+        if config['ob_data_Decompressed']:
+            uniqueIndex_decompressed = getUniqueStartIndex(decompressed_csv)
+            start, end = getStartAndEndIndex(decompressed_csv, uniqueIndex_decompressed[test_index])
+            testDataFrame = decompressed_csv[start:end]
+        else:
+            testDataFrame = compressed_csv[start:end]
 
         print('Total Epochs :', config['num_epochs'])
 
@@ -225,17 +213,6 @@ def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_pa
 
         # path = "../saved_model/lstm/model_best.pth"
         start_epoch = 0
-
-        # # # Load Saved Model if exists
-        # if os.path.isfile(path):
-        #     print("=> loading checkpoint '{}'".format(path))
-        #     checkpoint = torch.load(path, map_location=torch.device('cpu'))
-        #     model.load_state_dict(checkpoint['state_dict'])
-        #     optimizer.load_state_dict(checkpoint['optimizer'])
-        #     print("=> loaded checkpoint '{}'"
-        #           .format(path))
-        # else:
-        #     print("=> no checkpoint found at '{}'".format(path))
 
         # get Weighted Loss
         criterion = getWeightedLoss(trainDataFrame)
@@ -262,13 +239,14 @@ def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_pa
                                 num_workers=config['num_workers'],
                                 drop_last=False)
 
+
         early_stopping = EarlyStopping(patience=15, verbose=True)
 
         training(config['num_epochs'], trainLoader, optimizer, model, criterion, config['seq_dim'],
                  config['input_dim'], config['batch_size'],
-                 df, valLoader, start_epoch, file_name, early_stopping)
+                  valLoader, start_epoch, file_name, early_stopping)
 
-        # # Load Saved Model if exists
+        # Load Best Model from early stopping
         path = './checkpoint.pt'
         if os.path.isfile(path):
             print("=> loading checkpoint '{}'".format(path))
@@ -284,11 +262,12 @@ def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_pa
             test_loss, test_acc, test_f1_score, test_per_class_accuracy, test_confusion_matrix = eval_net(
                 model, testLoader, criterion, config, text='test')
 
+            print('test-acc:', test_acc, 'test_f1_score: ',test_f1_score, 'test_per_class_acc: ', test_per_class_accuracy)
+
             total_acc_for_LOOCV.append(test_acc)
             total_f1_for_LOOCV.append(test_f1_score)
             total_per_class_accuracy.append(test_per_class_accuracy)
             total_confusion_matrix.append(test_confusion_matrix)
-
 
     house_results_dictionary = {}
     print(house + '\n \n', 'test_acc:\t', np.mean(total_acc_for_LOOCV), '\t test f1 score', np.mean(total_f1_for_LOOCV),
@@ -305,15 +284,14 @@ def train(csv_file, ActivityIdList, ob_csv_file_path = None, decompressed_csv_pa
     if not os.path.exists(os.path.join('../logs', house)):
         os.mkdir(os.path.join('../logs', house))
 
-
-    if config['ob_data']:
-        np.save(os.path.join('../logs', house , house + 'ob_results_dict.npy'), house_results_dictionary)
+    if config['ob_data_compressed']:
+        np.save(os.path.join('../logs', house , run_configuration + '_' + house + '_ob_results_dict.npy'), house_results_dictionary)
+    if config['ob_data_Decompressed']:
+        np.save(os.path.join('../logs', house, run_configuration + '_' + house + '_ob_Decompressed_results_dict.npy'), house_results_dictionary)
     else:
-        np.save(os.path.join('../logs', house, house + '_results_dict.npy'), house_results_dictionary)
+        np.save(os.path.join('../logs', house, run_configuration + '_' + house + '_results_dict.npy'), house_results_dictionary)
 
     print('\n\n\n\n\n\n Finished house', house, '\n\n\n\n')
-
-
 
 
 def log_mean_class_accuracy(writer, per_class_accuracy, epoch, test_index, datasettype):
@@ -326,7 +304,7 @@ def log_mean_class_accuracy(writer, per_class_accuracy, epoch, test_index, datas
 
 
 # Train the Network
-def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, input_dim, batch_size, df, valLoader, start_epoch, file_name, early_stopping):
+def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, input_dim, batch_size, valLoader, start_epoch, file_name, early_stopping):
     valid_acc, val_per_class_accuracy, valid_loss, val_f1_score, val_confusion_matrix = [],[],[],[],[]
     writer = SummaryWriter(os.path.join('../../../logs', file_name, 'masterleaveOneHouseOut'))
     model.train()
@@ -356,9 +334,6 @@ def training(num_epochs, trainLoader,  optimizer, model, criterion, seq_dim, inp
 
             valid_loss, valid_acc, val_f1_score, val_per_class_accuracy, val_confusion_matrix= eval_net(
                 model, valLoader, criterion, config, text='test')
-
-
-
 
             # print('train set - average loss: {:.4f}, accuracy: {:.0f}%  train_f1_score: {:.4f} \n '
             #       .format(train_loss, 100. * train_acc, train_f1_score))
@@ -396,7 +371,6 @@ def eval_net(model, dataloader, criterion, config, text = 'train'):
     all_predicted = []
     nb_classes = config['output_dim']
     confusion_matrix = torch.zeros(nb_classes, nb_classes)
-
     for i, (input, labels) in enumerate(dataloader):
         input = input.view(-1, config['seq_dim'], config['input_dim'])
         if torch.cuda.is_available():
@@ -461,28 +435,46 @@ def getParticularsOfEachHouse(csv_file_path):
 
 if __name__ == "__main__":
     if sys.argv[1] != None:
+        run_time_configs = ['ob_data_Decompressed', 'ob_data_compressed', 'raw_data']
         house_name_list = ['ordonezB', 'houseB', 'houseC', 'houseA', 'ordonezA']
-        for house in house_name_list:
-            print('starting with house ', house)
-            file_name = sys.argv[1].split('.json')[0]
-            input_dir = os.path.join(os.getcwd(), '../', 'data', file_name)
-            csv_file_path = os.path.join(input_dir, file_name + '.csv')
+        for run_configuration in run_time_configs:
+            print('\n\n\n\nRunning configuration', run_configuration, '\n\n\n\n')
+            if run_configuration is 'raw_data':
+                config['ob_data_compressed'] = False
+                config['ob_data_Decompressed'] = False
+                config['raw_data'] = True
 
-            # file_path = os.path.join(input_dir, file_name + '.json')
-            # csv_length = pd.read_csv(csv_file_path).shape[0]
-            house_list = []
+            elif run_configuration is 'ob_data_compressed':
+                config['ob_data_compressed'] = True
+                config['ob_data_Decompressed'] = False
+                config['raw_data'] = False
 
-            if config['ob_data']:
-                csv_file_path = os.path.join(os.getcwd(), '../', 'data', house, 'ob_' + house + '.csv')
-                decompressed_csv_path = os.path.join(os.getcwd(), '../', 'data', house, 'ob_' + house + '.csv')
-            else:
-                csv_file_path = os.path.join(os.getcwd(), '../', 'data', house, house + '.csv')
-                decompressed_csv_path = os.path.join(os.getcwd(), '../', 'data', house, house + '.csv')
+            elif run_configuration is 'ob_data_Decompressed':
+                config['ob_data_compressed'] = False
+                config['ob_data_Decompressed'] = True
+                config['raw_data'] = False
 
-            config['input_dim'], config['output_dim'], config['ActivityIdList'] = getParticularsOfEachHouse(csv_file_path)
+            for house in house_name_list:
+                print('starting with house ', house)
+                file_name = sys.argv[1].split('.json')[0]
+                input_dir = os.path.join(os.getcwd(), '../', 'data', file_name)
+                csv_file_path = os.path.join(input_dir, file_name + '.csv')
 
-            ActivityIdList = config['ActivityIdList']
-            train(csv_file_path, ActivityIdList, csv_file_path, decompressed_csv_path, house)
+                # file_path = os.path.join(input_dir, file_name + '.json')
+                # csv_length = pd.read_csv(csv_file_path).shape[0]
+                house_list = []
 
+                if config['ob_data_compressed']:
+                    csv_file_path = os.path.join(os.getcwd(), '../', 'data', house, 'ob_' + house + '.csv')
+                    decompressed_csv_path = os.path.join(os.getcwd(), '../', 'data', house, 'ob_' + house + '.csv')
+                elif config['ob_data_Decompressed']:
+                    csv_file_path = os.path.join(os.getcwd(), '../', 'data', house, 'ob_' + house + '.csv')
+                    decompressed_csv_path = os.path.join(os.getcwd(), '../', 'data', house, 'ob_decompressed_' + house + '.csv')
+                elif config['raw_data']:
+                    csv_file_path = os.path.join(os.getcwd(), '../', 'data', house, house + '.csv')
+                    decompressed_csv_path = os.path.join(os.getcwd(), '../', 'data', house, house + '.csv')
 
+                config['input_dim'], config['output_dim'], config['ActivityIdList'] = getParticularsOfEachHouse(csv_file_path)
 
+                ActivityIdList = config['ActivityIdList']
+                train(csv_file_path, ActivityIdList, csv_file_path, decompressed_csv_path, house, run_configuration)
