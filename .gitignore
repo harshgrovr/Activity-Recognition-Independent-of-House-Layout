@@ -4,3 +4,4 @@ h5py/
 data/
 __pycache__/
 *.tar
+*.zip/
