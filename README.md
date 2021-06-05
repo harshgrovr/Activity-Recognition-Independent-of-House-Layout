@@ -14,6 +14,8 @@ https://user-images.githubusercontent.com/8547940/120897421-5c07bd00-c626-11eb-9
 - Approaches Used:
   - CNN-LSTM with images obtained via sensors as shows in Video and it is further solved as a video classification task.
   - LSTM with sensor Data.
-  - Graph Based Neural Network with sensors and house represented as the graphs.
+  - [Graph Based Approach](https://github.com/harshgrovr/Graphs-Approaches-for-Activity-Recognition-Independent-of-House-Layout)
   
+
+
 
